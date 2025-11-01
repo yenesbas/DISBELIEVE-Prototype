@@ -2,7 +2,7 @@
 
 > **🚧 Prototype Version**: This is the initial prototype of DISBELIEVE, demonstrating core gameplay mechanics and level design concepts. Expect further development and improvements in future versions!
 
-Welcome to DISBELIEVE, a mind-bending 2D platformer where nothing is as it seems! Can you navigate through increasingly deceptive levels filled with traps, fake platforms, and moving spikes?
+Welcome to DISBELIEVE, a mind-bending 2D platformer where nothing is as it seems! Can you navigate through increasingly deceptive levels filled with traps?
 
 ![Game Title Screen](screenshots/title.png)
 *(You can add your title screen screenshot here)*
