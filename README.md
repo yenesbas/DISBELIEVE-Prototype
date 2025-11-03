@@ -5,7 +5,6 @@
 Welcome to DISBELIEVE, a mind-bending 2D platformer where nothing is as it seems! Can you navigate through increasingly deceptive levels filled with traps?
 
 ![Game Title Screen](screenshots/title.png)
-*(You can add your title screen screenshot here)*
 
 ## 🎮 Play the Game
 
