@@ -411,6 +411,25 @@ const levels = [
     ],
     spikeTriggers: [-2, -2.5, -3, -4, -3],           // Horizontal offsets
     spikeTriggerLengths: [250, 81, 82, 83, 0]  // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
+  },
+  {
+    name: "Level 10: End of Prototype",
+    map: [
+      "....................",
+      "....................",
+      ".....24.......12....",
+      "#.#################.",
+      "###.............F.#.",
+      "..................#.",
+      ".....##...........#.",
+      ".....FF............4",
+      ".##################1",
+      "....................",
+      "....................",
+      "...................."
+    ],
+    spikeTriggers: [-0.5, -4, -0.5, -1, -1, -2],           // Horizontal offsets
+    spikeTriggerLengths: [250, 200, 1, 200, ,81, 400, 1]  // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
   }
 ];
 
@@ -1083,7 +1102,11 @@ function drawMenu() {
     // Button hint
     ctx.fillStyle = '#888888';
     ctx.font = '22px Arial';
+    if (i < 9) {
     ctx.fillText(`Press ${i + 1}`, canvas.width / 2 - 255 + x * 120, y + 23);
+    } else {
+    ctx.fillText(`Press 0`, canvas.width / 2 - 255 + x * 120, y + 23);
+    }
     window.levelButtons.push({
       x: bx,
       y: by,
@@ -1153,6 +1176,9 @@ document.addEventListener('keydown', (e) => {
       updateStats();
     } else if (e.code === 'Digit9' || e.code === 'Numpad9') {
       loadLevel(8);
+      updateStats();
+    } else if (e.code === 'Digit0' || e.code === 'Numpad0') {
+      loadLevel(9);
       updateStats();
     }
     return;
