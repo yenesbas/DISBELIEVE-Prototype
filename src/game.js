@@ -235,183 +235,233 @@ function setupAudioControls() {
 // - Yellow dashed lines show trigger positions (visible during gameplay)
 // - Make sure spikes have room to move right (check empty space)
 
-const levels = [
-  // Level 1 - Introduction (spike moves 2 tiles, default trigger)
+const chapters = [
   {
-    name: "Level 1: First Steps",
-    map: [
-      "....................",
-      "....................",
-      "....................",
-      "....................",
-      "....................",
-      "....................",
-      "....................",
-      "###...............D.",
-      "...#...2.....#######",
-      "....######.#........"
+    name: "Chapter 1: First Deceptions",
+    description: "Learn to question what you see",
+    levels: [
+      // Level 1 - Introduction (spike moves 2 tiles, default trigger)
+      {
+        name: "Level 1: First Steps",
+        map: [
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "###...............D.",
+          "...#...2.....#######",
+          "....######.#........"
+        ]
+        // No spikeTriggers = uses default (2 tiles left of spike)
+      },
+      // Level 2 - Custom triggers (first spike triggers early, second triggers late)
+      {
+        name: "Level 2: Fake Floors",
+        map: [
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "####................",
+          "........2...1.....D.",
+          ".....###############"
+        ],
+        spikeTriggers: [-3, 0]  // First spike: 1 tile left, Second spike: 1 tile left
+      },
+      // Level 3 - Mixed triggers (variety for maximum deception)
+      {
+        name: "Level 3: Total Deception",
+        map: [
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "...........#........",
+          "###...........#.###F",
+          ".....1...#2...3...D.",
+          "...####..#####.#####"
+        ],
+        spikeTriggers: [-1, -2, -2],           // Horizontal offsets
+        spikeTriggerLengths: [180, 160, null]   // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
+      },
+      // Level 4 - ??? (variety for maximum deception)
+      {
+        name: "Level 4: ???",
+        map: [
+          "....................",
+          "....................",
+          "....................",
+          "....#...............",
+          "....#..##...........",
+          "....#...#...........",
+          "....##..##..........",
+          "........#....3....D.",
+          "###########FF.######"
+        ],
+        spikeTriggers: [-3]  // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
+      },
+      {
+        name: "Level 5: Beginner's Trap",
+        map: [
+          "....................",
+          "....................",
+          "....................",
+          ".....1..............",
+          "#####.####..FF######",
+          "....................",
+          "....................",
+          ".......3...2......D.",
+          "####################"
+        ],
+        spikeTriggers: [-0.5, -3, -1]  // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
+      },
+      {
+        name: "Level 6: Too Easy?",
+        map: [
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "..................D.",
+          "F##FF#FFF####FFF####",
+          "11111111111111111111"
+        ],
+        spikeTriggers: [],  // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
+        spikeTriggerLengths: [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]  // All spikes have very short triggers (1px height) to force immediate activation
+      },
+      {
+        name: "Level 7: Up or Down?",
+        map: [
+          "....................",
+          "....................",
+          "....................",
+          "...........#........",
+          "........#....2......",
+          "....#.............D.",
+          "................###.",
+          ".#..................",
+          "..............F.....",
+          ".......F............",
+          "...#......#.........",
+        ],
+        spikeTriggers: [-2]  // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
+      },
+      {
+        name: "Level 8: Gotcha!",
+        map: [
+          "....................",
+          "....................",
+          ".....#.....FF....D..",
+          ".#.....F...2.....F..",
+          ".3.....3........F...",
+          "...............#....",
+          "...#.........F#.....",
+          "..........F#........",
+          "....................",
+          "....F#..#F..........",
+          ".F...4..............",
+          "...................."
+        ],
+        spikeTriggers: [-4, -2, -2, -2]  // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
+      },
+      {
+        name: "Level 9: ???",
+        map: [
+          "....................",
+          "....................",
+          "....................",
+          "#######F###########.",
+          "..#..2#....#......F.",
+          "..#.#.#..F.#.#....F.",
+          "...4#....#...#.2#...",
+          ".##############F####",
+          ".........#...#....#.",
+          ".........#.#.#....#.",
+          ".....2D....#...4#....",
+          "###################F"
+        ],
+        spikeTriggers: [-2, -2.5, -3, -4, -3],           // Horizontal offsets
+        spikeTriggerLengths: [250, 81, 82, 83, 0]  // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
+      },
+      {
+        name: "Level 10: Chapter Finale",
+        map: [
+          "....................",
+          "....................",
+          "FFF..24.......12....",
+          "#.#################.",
+          "###...............#.",
+          "..................#.",
+          "....11#..#...#..#.#.",
+          "....FFF11#211#11#..4",
+          ".##################1",
+          "....................",
+          "..................D.",
+          "#####FF#############"
+        ],
+        spikeTriggers: [-0.5, -4, -0.5, -1, -50, -50, -1, -50, -1, -50, -50, -50, -50, -1],           // Horizontal offsets
+        spikeTriggerLengths: [250, 200, 1, 200, 1.05, 1.1, 150, 2, 150, 4, 5, 6, 7, 400, 9]  // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
+      }
     ]
-    // No spikeTriggers = uses default (2 tiles left of spike)
-  },
-  // Level 2 - Custom triggers (first spike triggers early, second triggers late)
-  {
-    name: "Level 2: Fake Floors",
-    map: [
-      "....................",
-      "....................",
-      "....................",
-      "....................",
-      "....................",
-      "....................",
-      "####................",
-      "........2...1.....D.",
-      ".....###############"
-    ],
-    spikeTriggers: [-3, 0]  // First spike: 1 tile left, Second spike: 1 tile left
-  },
-  // Level 3 - Mixed triggers (variety for maximum deception)
-  {
-    name: "Level 3: Total Deception",
-    map: [
-      "....................",
-      "....................",
-      "....................",
-      "....................",
-      "....................",
-      "...........#........",
-      "###...........#.###F",
-      ".....1...#2...3...D.",
-      "...####..#####.#####"
-    ],
-    spikeTriggers: [-1, -2, -2],           // Horizontal offsets
-    spikeTriggerLengths: [180, 160, null]   // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
-  },
-  // Level 4 - ??? (variety for maximum deception)
-  {
-    name: "Level 4: ???",
-    map: [
-      "....................",
-      "....................",
-      "....................",
-      "....#...............",
-      "....#..##...........",
-      "....#...#...........",
-      "....##..##..........",
-      "........#....3....D.",
-      "###########FF.######"
-    ],
-    spikeTriggers: [-3]  // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
-  },
-  {
-    name: "Level 5: Beginner's Trap",
-    map: [
-      "....................",
-      "....................",
-      "....................",
-      ".....1..............",
-      "#####.####..FF######",
-      "....................",
-      "....................",
-      ".......3...2......D.",
-      "####################"
-    ],
-    spikeTriggers: [-0.5, -3, -1]  // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
-  },
-  {
-    name: "Level 6: Too Easy?",
-    map: [
-      "....................",
-      "....................",
-      "....................",
-      "....................",
-      "....................",
-      "....................",
-      "....................",
-      "..................D.",
-      "F##FF#FFF####FFF####",
-      "11111111111111111111"
-    ],
-    spikeTriggers: [],  // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
-    spikeTriggerLengths: [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]  // All spikes have very short triggers (1px height) to force immediate activation
-  },
-  {
-    name: "Level 7: Up or Down?",
-    map: [
-      "....................",
-      "....................",
-      "....................",
-      "...........#........",
-      "........#....2......",
-      "....#.............D.",
-      "................###.",
-      ".#..................",
-      "..............F.....",
-      ".......F............",
-      "...#......#.........",
-    ],
-    spikeTriggers: [-2]  // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
-  },
-  {
-    name: "Level 8: Gotcha!",
-    map: [
-      "....................",
-      "....................",
-      ".....#.....FF....D..",
-      ".#.....F...2.....F..",
-      ".3.....3........F...",
-      "...............#....",
-      "...#.........F#.....",
-      "..........F#........",
-      "....................",
-      "....F#..#F..........",
-      ".F...4..............",
-      "...................."
-    ],
-    spikeTriggers: [-4, -2, -2, -2]  // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
-  },
-  {
-    name: "Level 9: ???",
-    map: [
-      "....................",
-      "....................",
-      "....................",
-      "#######F###########.",
-      "..#..2#....#......F.",
-      "..#.#.#..F.#.#....F.",
-      "...4#....#...#.2#...",
-      ".##############F####",
-      ".........#...#....#.",
-      ".........#.#.#....#.",
-      ".....2D....#...4#....",
-      "###################F"
-    ],
-    spikeTriggers: [-2, -2.5, -3, -4, -3],           // Horizontal offsets
-    spikeTriggerLengths: [250, 81, 82, 83, 0]  // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
-  },
-  {
-    name: "Level 10: Finale",
-    map: [
-      "....................",
-      "....................",
-      "FFF..24.......12....",
-      "#.#################.",
-      "###...............#.",
-      "..................#.",
-      "....11#..#...#..#.#.",
-      "....FFF11#211#11#..4",
-      ".##################1",
-      "....................",
-      "..................D.",
-      "#####FF#############"
-    ],
-    spikeTriggers: [-0.5, -4, -0.5, -1, -50, -50, -1, -50, -1, -50, -50, -50, -50, -1],           // Horizontal offsets
-    spikeTriggerLengths: [250, 200, 1, 200, 1.05, 1.1, 150, 2, 150, 4, 5, 6, 7, 400, 9]  // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
   }
+  // Future chapters can be added here:
+  // {
+  //   name: "Chapter 2: Advanced Illusions",
+  //   description: "Master the art of disbelief",
+  //   levels: [
+  //     // 10 more levels here...
+  //   ]
+  // }
 ];
 
+// Legacy compatibility - flatten chapters into single levels array for backwards compatibility
+const levels = [];
+chapters.forEach(chapter => {
+  levels.push(...chapter.levels);
+});
+
+// Helper functions for chapter/level management
+function getChapterFromGlobalLevel(globalLevelIndex) {
+  return Math.floor(globalLevelIndex / 10);
+}
+
+function getLevelInChapterFromGlobalLevel(globalLevelIndex) {
+  return globalLevelIndex % 10;
+}
+
+function getGlobalLevelIndex(chapterIndex, levelInChapter) {
+  return chapterIndex * 10 + levelInChapter;
+}
+
+function getCurrentChapterInfo() {
+  if (currentChapter >= 0 && currentChapter < chapters.length) {
+    return chapters[currentChapter];
+  }
+  return null;
+}
+
+function getCurrentLevelInfo() {
+  const chapterInfo = getCurrentChapterInfo();
+  if (chapterInfo && currentLevelInChapter >= 0 && currentLevelInChapter < chapterInfo.levels.length) {
+    return chapterInfo.levels[currentLevelInChapter];
+  }
+  return null;
+}
+
 // Game state
-let gameState = 'menu'; // 'menu', 'settings', 'levelSelect', 'playing', 'levelComplete'
+let gameState = 'menu'; // 'menu', 'settings', 'chapterSelect', 'levelSelect', 'playing', 'levelComplete'
+let currentChapter = 0;
 let currentLevel = 0;
+let currentLevelInChapter = 0; // 0-based index within the current chapter
 let player = null;
 let platforms = [];
 let fakeBlocks = []; // Blocks that look solid but player passes through
@@ -501,9 +551,22 @@ function init() {
   gameLoop();
 }
 
-// Load a specific level
-function loadLevel(levelIndex) {
-  currentLevel = levelIndex;
+// Load a specific level by chapter and level within chapter
+function loadLevelFromChapter(chapterIndex, levelInChapter) {
+  currentChapter = chapterIndex;
+  currentLevelInChapter = levelInChapter;
+  currentLevel = getGlobalLevelIndex(chapterIndex, levelInChapter);
+  levelDeaths = 0;
+  parseLevel();
+  resetPlayer();
+  gameState = 'playing';
+}
+
+// Load a specific level by global index (for backwards compatibility)
+function loadLevel(globalLevelIndex) {
+  currentLevel = globalLevelIndex;
+  currentChapter = getChapterFromGlobalLevel(globalLevelIndex);
+  currentLevelInChapter = getLevelInChapterFromGlobalLevel(globalLevelIndex);
   levelDeaths = 0;
   parseLevel();
   resetPlayer();
@@ -641,6 +704,11 @@ function update(deltaTime) {
     return;
   }
 
+  // Chapter selection state
+  if (gameState === 'chapterSelect') {
+    return;
+  }
+
   // Level selection state
   if (gameState === 'levelSelect') {
     return;
@@ -650,14 +718,26 @@ function update(deltaTime) {
   if (gameState === 'levelComplete') {
     levelCompleteTimer -= deltaTime;
     if (levelCompleteTimer <= 0) {
-      // Move to next level
-      if (currentLevel < levels.length - 1) {
-        loadLevel(currentLevel + 1);
+      // Check if there are more levels in current chapter
+      if (currentLevelInChapter < chapters[currentChapter].levels.length - 1) {
+        // Move to next level in current chapter
+        loadLevelFromChapter(currentChapter, currentLevelInChapter + 1);
         updateStats();
       } else {
-        // Game complete, return to menu
-        gameState = 'menu';
-        currentLevel = 0;
+        // Chapter complete
+        if (currentChapter < chapters.length - 1) {
+          // More chapters available, go to chapter select
+          gameState = 'chapterSelect';
+          currentChapter = 0;
+          currentLevel = 0;
+          currentLevelInChapter = 0;
+        } else {
+          // All chapters complete, return to main menu
+          gameState = 'menu';
+          currentChapter = 0;
+          currentLevel = 0;
+          currentLevelInChapter = 0;
+        }
       }
     }
     return;
@@ -894,6 +974,12 @@ function render() {
     return;
   }
 
+  // Chapter selection screen
+  if (gameState === 'chapterSelect') {
+    drawChapterSelect();
+    return;
+  }
+
   // Level selection screen
   if (gameState === 'levelSelect') {
     drawLevelSelect();
@@ -1120,8 +1206,8 @@ function drawMenu() {
   ctx.textAlign = 'left';
 }
 
-// Draw level selection screen
-function drawLevelSelect() {
+// Draw chapter selection screen
+function drawChapterSelect() {
   ctx.fillStyle = '#2a2a2a';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -1129,20 +1215,115 @@ function drawLevelSelect() {
   ctx.fillStyle = '#9844ffff';
   ctx.font = 'bold 72px Arial';
   ctx.textAlign = 'center';
-  ctx.fillText('SELECT LEVEL', canvas.width / 2, 120);
+  ctx.fillText('SELECT CHAPTER', canvas.width / 2, 120);
+
+  // Chapter buttons
+  window.chapterButtons = [];
+  
+  for (let i = 0; i < chapters.length; i++) {
+    const chapter = chapters[i];
+    const buttonWidth = 500;
+    const buttonHeight = 100;
+    const buttonX = canvas.width / 2 - buttonWidth / 2;
+    const buttonY = 220 + i * 130;
+    
+    // Draw button background
+    ctx.fillStyle = '#444444';
+    ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
+    ctx.strokeStyle = '#888888';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
+    
+    // Chapter number
+    ctx.fillStyle = '#8c44ff';
+    ctx.font = 'bold 36px Arial';
+    ctx.fillText(`Chapter ${i + 1}`, canvas.width / 2, buttonY + 35);
+    
+    // Chapter name
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 24px Arial';
+    ctx.fillText(chapter.name.replace(`Chapter ${i + 1}: `, ''), canvas.width / 2, buttonY + 65);
+    
+    // Chapter description
+    ctx.fillStyle = '#aaaaaa';
+    ctx.font = '18px Arial';
+    ctx.fillText(chapter.description, canvas.width / 2, buttonY + 85);
+    
+    window.chapterButtons.push({
+      x: buttonX,
+      y: buttonY,
+      width: buttonWidth,
+      height: buttonHeight,
+      chapter: i
+    });
+  }
+
+  // Back button
+  let backX = 50;
+  let backY = canvas.height - 100;
+  ctx.fillStyle = '#444444';
+  ctx.fillRect(backX, backY, 120, 50);
+  ctx.strokeStyle = '#888888';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(backX, backY, 120, 50);
+  
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '24px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('BACK', backX + 60, backY + 32);
+  
+  window.backButton = {
+    x: backX,
+    y: backY,
+    width: 120,
+    height: 50
+  };
+
+  // Instructions
+  ctx.fillStyle = '#666666';
+  ctx.font = '26px Arial';
+  ctx.fillText('ESC - Back to Menu', canvas.width / 2, canvas.height - 30);
+
+  ctx.textAlign = 'left';
+}
+
+// Draw level selection screen
+function drawLevelSelect() {
+  ctx.fillStyle = '#2a2a2a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Get current chapter info
+  const chapterInfo = getCurrentChapterInfo();
+  if (!chapterInfo) {
+    // No valid chapter, go back to chapter select
+    gameState = 'chapterSelect';
+    return;
+  }
+
+  // Title
+  ctx.fillStyle = '#9844ffff';
+  ctx.font = 'bold 48px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(`Chapter ${currentChapter + 1}: ${chapterInfo.name.replace(`Chapter ${currentChapter + 1}: `, '')}`, canvas.width / 2, 100);
+  
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 32px Arial';
+  ctx.fillText('SELECT LEVEL', canvas.width / 2, 140);
 
   // Level buttons (scaled to 90x90)
   let y = 220;
   let x = 0;
   window.levelButtons = [];
-  for (let i = 0; i < levels.length; i++) {
-    if(i == 5 && i < 8) {
+  
+  for (let i = 0; i < chapterInfo.levels.length; i++) {
+    if(i == 5) {
       y = 220 + 120;
       x = 0;
     }
 
     let bx = canvas.width / 2 - 300 + x * 120;
     let by = y - 52;
+    
     // Draw button
     ctx.fillStyle = '#444444';
     ctx.fillRect(bx, by, 90, 90);
@@ -1163,12 +1344,13 @@ function drawLevelSelect() {
     } else {
       ctx.fillText(`Press 0`, canvas.width / 2 - 255 + x * 120, y + 23);
     }
+    
     window.levelButtons.push({
       x: bx,
       y: by,
       width: 90,
       height: 90,
-      level: i
+      levelInChapter: i
     });
     x++;
   }
@@ -1197,7 +1379,7 @@ function drawLevelSelect() {
   // Instructions
   ctx.fillStyle = '#666666';
   ctx.font = '26px Arial';
-  ctx.fillText('ESC - Back to Menu', canvas.width / 2, canvas.height - 30);
+  ctx.fillText('ESC - Back to Chapters', canvas.width / 2, canvas.height - 30);
 
   ctx.textAlign = 'left';
 }
@@ -1359,40 +1541,63 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  // Chapter selection controls
+  if (gameState === 'chapterSelect') {
+    if (e.code === 'Digit1' || e.code === 'Numpad1') {
+      if (chapters.length >= 1) {
+        currentChapter = 0;
+        gameState = 'levelSelect';
+      }
+    } else if (e.code === 'Digit2' || e.code === 'Numpad2') {
+      if (chapters.length >= 2) {
+        currentChapter = 1;
+        gameState = 'levelSelect';
+      }
+    } else if (e.code === 'Digit3' || e.code === 'Numpad3') {
+      if (chapters.length >= 3) {
+        currentChapter = 2;
+        gameState = 'levelSelect';
+      }
+    } else if (e.code === 'Escape') {
+      gameState = 'menu';
+    }
+    return;
+  }
+
   // Level selection controls
   if (gameState === 'levelSelect') {
     if (e.code === 'Digit1' || e.code === 'Numpad1') {
-      loadLevel(0);
+      loadLevelFromChapter(currentChapter, 0);
       updateStats();
     } else if (e.code === 'Digit2' || e.code === 'Numpad2') {
-      loadLevel(1);
+      loadLevelFromChapter(currentChapter, 1);
       updateStats();
     } else if (e.code === 'Digit3' || e.code === 'Numpad3') {
-      loadLevel(2);
+      loadLevelFromChapter(currentChapter, 2);
       updateStats();
     } else if (e.code === 'Digit4' || e.code === 'Numpad4') {
-      loadLevel(3);
+      loadLevelFromChapter(currentChapter, 3);
       updateStats();
     } else if (e.code === 'Digit5' || e.code === 'Numpad5') {
-      loadLevel(4);
+      loadLevelFromChapter(currentChapter, 4);
       updateStats();
     } else if (e.code === 'Digit6' || e.code === 'Numpad6') {
-      loadLevel(5);
+      loadLevelFromChapter(currentChapter, 5);
       updateStats();
     } else if (e.code === 'Digit7' || e.code === 'Numpad7') {
-      loadLevel(6);
+      loadLevelFromChapter(currentChapter, 6);
       updateStats();
     } else if (e.code === 'Digit8' || e.code === 'Numpad8') {
-      loadLevel(7);
+      loadLevelFromChapter(currentChapter, 7);
       updateStats();
     } else if (e.code === 'Digit9' || e.code === 'Numpad9') {
-      loadLevel(8);
+      loadLevelFromChapter(currentChapter, 8);
       updateStats();
     } else if (e.code === 'Digit0' || e.code === 'Numpad0') {
-      loadLevel(9);
+      loadLevelFromChapter(currentChapter, 9);
       updateStats();
     } else if (e.code === 'Escape') {
-      gameState = 'menu';
+      gameState = 'chapterSelect';
     }
     return;
   }
@@ -1415,10 +1620,11 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.code === 'KeyR') keys.r = true;
 
-  // ESC to return to menu
+  // ESC to return to chapter select
   if (e.code === 'Escape') {
-    gameState = 'menu';
+    gameState = 'chapterSelect';
     currentLevel = 0;
+    currentLevelInChapter = 0;
     deaths = 0;
     levelDeaths = 0;
     updateStats();
@@ -1453,7 +1659,7 @@ canvas.addEventListener('mousedown', function(e) {
             for (let btn of window.menuButtons) {
                 if (mx >= btn.x && mx <= btn.x + btn.width && my >= btn.y && my <= btn.y + btn.height) {
                     if (btn.action === 'startGame') {
-                        gameState = 'levelSelect';
+                        gameState = 'chapterSelect';
                     } else if (btn.action === 'settings') {
                         gameState = 'settings';
                     }
@@ -1464,14 +1670,14 @@ canvas.addEventListener('mousedown', function(e) {
         return;
     }
 
-    // Level selection interactions
-    if (gameState === 'levelSelect') {
-        // Check level buttons
-        if (window.levelButtons) {
-            for (let btn of window.levelButtons) {
+    // Chapter selection interactions
+    if (gameState === 'chapterSelect') {
+        // Check chapter buttons
+        if (window.chapterButtons) {
+            for (let btn of window.chapterButtons) {
                 if (mx >= btn.x && mx <= btn.x + btn.width && my >= btn.y && my <= btn.y + btn.height) {
-                    loadLevel(btn.level);
-                    updateStats();
+                    currentChapter = btn.chapter;
+                    gameState = 'levelSelect';
                     break;
                 }
             }
@@ -1482,6 +1688,28 @@ canvas.addEventListener('mousedown', function(e) {
             mx >= window.backButton.x && mx <= window.backButton.x + window.backButton.width &&
             my >= window.backButton.y && my <= window.backButton.y + window.backButton.height) {
             gameState = 'menu';
+        }
+        return;
+    }
+
+    // Level selection interactions
+    if (gameState === 'levelSelect') {
+        // Check level buttons
+        if (window.levelButtons) {
+            for (let btn of window.levelButtons) {
+                if (mx >= btn.x && mx <= btn.x + btn.width && my >= btn.y && my <= btn.y + btn.height) {
+                    loadLevelFromChapter(currentChapter, btn.levelInChapter);
+                    updateStats();
+                    break;
+                }
+            }
+        }
+        
+        // Check back button
+        if (window.backButton && 
+            mx >= window.backButton.x && mx <= window.backButton.x + window.backButton.width &&
+            my >= window.backButton.y && my <= window.backButton.y + window.backButton.height) {
+            gameState = 'chapterSelect';
         }
         return;
     }
