@@ -211,31 +211,7 @@ function playSound(soundName) {
 function setupAudioControls() {
   // Update volumes to initial defaults
   updateVolumes();
-
-  const masterEl = document.getElementById('masterVol');
-  const musicEl = document.getElementById('musicVol');
-  const sfxEl = document.getElementById('sfxVol');
-
-  if (masterEl) {
-    masterEl.value = masterVolume;
-    masterEl.addEventListener('input', (e) => {
-      setMasterVolume(parseFloat(e.target.value));
-    });
-  }
-
-  if (musicEl) {
-    musicEl.value = musicVolume;
-    musicEl.addEventListener('input', (e) => {
-      setMusicVolume(parseFloat(e.target.value));
-    });
-  }
-
-  if (sfxEl) {
-    sfxEl.value = sfxVolume;
-    sfxEl.addEventListener('input', (e) => {
-      setSfxVolume(parseFloat(e.target.value));
-    });
-  }
+  // HTML sliders have been removed - volume control is now handled in the settings menu
 }
 
 // All levels
@@ -434,7 +410,7 @@ const levels = [
 ];
 
 // Game state
-let gameState = 'menu'; // 'menu', 'playing', 'levelComplete'
+let gameState = 'menu'; // 'menu', 'settings', 'levelSelect', 'playing', 'levelComplete'
 let currentLevel = 0;
 let player = null;
 let platforms = [];
@@ -657,6 +633,16 @@ function resetPlayer() {
 function update(deltaTime) {
   // Menu state
   if (gameState === 'menu') {
+    return;
+  }
+
+  // Settings state
+  if (gameState === 'settings') {
+    return;
+  }
+
+  // Level selection state
+  if (gameState === 'levelSelect') {
     return;
   }
 
@@ -902,6 +888,18 @@ function render() {
     return;
   }
 
+  // Settings screen
+  if (gameState === 'settings') {
+    drawSettings();
+    return;
+  }
+
+  // Level selection screen
+  if (gameState === 'levelSelect') {
+    drawLevelSelect();
+    return;
+  }
+
   // Draw platforms (solid blocks)
   ctx.fillStyle = '#666';
   platforms.forEach(platform => {
@@ -1070,18 +1068,76 @@ function drawMenu() {
   ctx.font = '30px Arial';
   ctx.fillText('Can you survive the deception?', canvas.width / 2, 210);
 
-  // Level selection
-  ctx.fillStyle = '#aaaaaa';
-  ctx.font = 'bold 48px Arial';
-  ctx.fillText('SELECT LEVEL', canvas.width / 2, 330);
+  // Menu buttons
+  window.menuButtons = [];
+  
+  // Start Game button
+  let startX = canvas.width / 2 - 150;
+  let startY = 300;
+  ctx.fillStyle = '#444444';
+  ctx.fillRect(startX, startY, 300, 60);
+  ctx.strokeStyle = '#888888';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(startX, startY, 300, 60);
+  
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 36px Arial';
+  ctx.fillText('START GAME', canvas.width / 2, startY + 40);
+  
+  window.menuButtons.push({
+    x: startX,
+    y: startY,
+    width: 300,
+    height: 60,
+    action: 'startGame'
+  });
+
+  // Settings button
+  let settingsY = 380;
+  ctx.fillStyle = '#444444';
+  ctx.fillRect(startX, settingsY, 300, 60);
+  ctx.strokeStyle = '#888888';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(startX, settingsY, 300, 60);
+  
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 36px Arial';
+  ctx.fillText('SETTINGS', canvas.width / 2, settingsY + 40);
+  
+  window.menuButtons.push({
+    x: startX,
+    y: settingsY,
+    width: 300,
+    height: 60,
+    action: 'settings'
+  });
+
+  // Instructions
+  ctx.fillStyle = '#666666';
+  ctx.font = '26px Arial';
+  ctx.fillText('Hint: DISBELIEVE WHAT YOU SEE', canvas.width / 2, canvas.height - 50);
+
+  ctx.textAlign = 'left';
+}
+
+// Draw level selection screen
+function drawLevelSelect() {
+  ctx.fillStyle = '#2a2a2a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Title
+  ctx.fillStyle = '#9844ffff';
+  ctx.font = 'bold 72px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('SELECT LEVEL', canvas.width / 2, 120);
 
   // Level buttons (scaled to 90x90)
-  let y = 420;
+  let y = 220;
   let x = 0;
   window.levelButtons = [];
   for (let i = 0; i < levels.length; i++) {
     if(i == 5 && i < 8) {
-      y = 420 + 120;
+      y = 220 + 120;
       x = 0;
     }
 
@@ -1103,9 +1159,9 @@ function drawMenu() {
     ctx.fillStyle = '#888888';
     ctx.font = '22px Arial';
     if (i < 9) {
-    ctx.fillText(`Press ${i + 1}`, canvas.width / 2 - 255 + x * 120, y + 23);
+      ctx.fillText(`Press ${i + 1}`, canvas.width / 2 - 255 + x * 120, y + 23);
     } else {
-    ctx.fillText(`Press 0`, canvas.width / 2 - 255 + x * 120, y + 23);
+      ctx.fillText(`Press 0`, canvas.width / 2 - 255 + x * 120, y + 23);
     }
     window.levelButtons.push({
       x: bx,
@@ -1117,10 +1173,159 @@ function drawMenu() {
     x++;
   }
 
+  // Back button
+  let backX = 50;
+  let backY = canvas.height - 100;
+  ctx.fillStyle = '#444444';
+  ctx.fillRect(backX, backY, 120, 50);
+  ctx.strokeStyle = '#888888';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(backX, backY, 120, 50);
+  
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '24px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('BACK', backX + 60, backY + 32);
+  
+  window.backButton = {
+    x: backX,
+    y: backY,
+    width: 120,
+    height: 50
+  };
+
   // Instructions
   ctx.fillStyle = '#666666';
   ctx.font = '26px Arial';
-  ctx.fillText('Hint: DISBELIEVE WHAT YOU SEE', canvas.width / 2, canvas.height - 50);
+  ctx.fillText('ESC - Back to Menu', canvas.width / 2, canvas.height - 30);
+
+  ctx.textAlign = 'left';
+}
+
+// Draw settings screen
+function drawSettings() {
+  ctx.fillStyle = '#2a2a2a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Title
+  ctx.fillStyle = '#9844ffff';
+  ctx.font = 'bold 72px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('SETTINGS', canvas.width / 2, 120);
+
+  // Audio settings
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '36px Arial';
+  ctx.fillText('AUDIO', canvas.width / 2, 200);
+
+  // Volume controls
+  const sliderWidth = 300;
+  const sliderHeight = 20;
+  const centerX = canvas.width / 2;
+  
+  // Master Volume
+  ctx.fillStyle = '#aaaaaa';
+  ctx.font = '24px Arial';
+  ctx.fillText('Master Volume', centerX - 150, 260);
+  
+  // Master volume slider background
+  ctx.fillStyle = '#444444';
+  ctx.fillRect(centerX - sliderWidth/2, 270, sliderWidth, sliderHeight);
+  
+  // Master volume slider fill
+  ctx.fillStyle = '#8c44ff';
+  ctx.fillRect(centerX - sliderWidth/2, 270, sliderWidth * masterVolume, sliderHeight);
+  
+  // Master volume value
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '20px Arial';
+  ctx.fillText(`${Math.round(masterVolume * 100)}%`, centerX + sliderWidth/2 + 20, 287);
+
+  // Music Volume
+  ctx.fillStyle = '#aaaaaa';
+  ctx.font = '24px Arial';
+  ctx.fillText('Music Volume', centerX - 150, 340);
+  
+  // Music volume slider background
+  ctx.fillStyle = '#444444';
+  ctx.fillRect(centerX - sliderWidth/2, 350, sliderWidth, sliderHeight);
+  
+  // Music volume slider fill
+  ctx.fillStyle = '#8c44ff';
+  ctx.fillRect(centerX - sliderWidth/2, 350, sliderWidth * musicVolume, sliderHeight);
+  
+  // Music volume value
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '20px Arial';
+  ctx.fillText(`${Math.round(musicVolume * 100)}%`, centerX + sliderWidth/2 + 20, 367);
+
+  // SFX Volume
+  ctx.fillStyle = '#aaaaaa';
+  ctx.font = '24px Arial';
+  ctx.fillText('SFX Volume', centerX - 150, 420);
+  
+  // SFX volume slider background
+  ctx.fillStyle = '#444444';
+  ctx.fillRect(centerX - sliderWidth/2, 430, sliderWidth, sliderHeight);
+  
+  // SFX volume slider fill
+  ctx.fillStyle = '#8c44ff';
+  ctx.fillRect(centerX - sliderWidth/2, 430, sliderWidth * sfxVolume, sliderHeight);
+  
+  // SFX volume value
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '20px Arial';
+  ctx.fillText(`${Math.round(sfxVolume * 100)}%`, centerX + sliderWidth/2 + 20, 447);
+
+  // Store slider positions for mouse interaction
+  window.volumeSliders = [
+    {
+      x: centerX - sliderWidth/2,
+      y: 270,
+      width: sliderWidth,
+      height: sliderHeight,
+      type: 'master'
+    },
+    {
+      x: centerX - sliderWidth/2,
+      y: 350,
+      width: sliderWidth,
+      height: sliderHeight,
+      type: 'music'
+    },
+    {
+      x: centerX - sliderWidth/2,
+      y: 430,
+      width: sliderWidth,
+      height: sliderHeight,
+      type: 'sfx'
+    }
+  ];
+
+  // Back button
+  let backX = 50;
+  let backY = canvas.height - 100;
+  ctx.fillStyle = '#444444';
+  ctx.fillRect(backX, backY, 120, 50);
+  ctx.strokeStyle = '#888888';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(backX, backY, 120, 50);
+  
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '24px Arial';
+  ctx.fillText('BACK', backX + 60, backY + 32);
+  
+  window.backButton = {
+    x: backX,
+    y: backY,
+    width: 120,
+    height: 50
+  };
+
+  // Instructions
+  ctx.fillStyle = '#666666';
+  ctx.font = '24px Arial';
+  ctx.fillText('ESC - Back to Menu  |  Click and drag sliders to adjust volume', canvas.width / 2, canvas.height - 30);
 
   ctx.textAlign = 'left';
 }
@@ -1150,6 +1355,12 @@ function gameLoop(currentTime = 0) {
 document.addEventListener('keydown', (e) => {
   // Menu controls
   if (gameState === 'menu') {
+    // No specific keyboard controls for main menu
+    return;
+  }
+
+  // Level selection controls
+  if (gameState === 'levelSelect') {
     if (e.code === 'Digit1' || e.code === 'Numpad1') {
       loadLevel(0);
       updateStats();
@@ -1180,6 +1391,16 @@ document.addEventListener('keydown', (e) => {
     } else if (e.code === 'Digit0' || e.code === 'Numpad0') {
       loadLevel(9);
       updateStats();
+    } else if (e.code === 'Escape') {
+      gameState = 'menu';
+    }
+    return;
+  }
+
+  // Settings controls
+  if (gameState === 'settings') {
+    if (e.code === 'Escape') {
+      gameState = 'menu';
     }
     return;
   }
@@ -1217,21 +1438,113 @@ document.addEventListener('keyup', (e) => {
   if (e.code === 'KeyR') keys.r = false;
 });
 
-// Handle mouse click on canvas (for level selection)
+// Handle mouse interactions
+let isDragging = false;
+let dragSlider = null;
+
 canvas.addEventListener('mousedown', function(e) {
-    if (gameState !== 'menu') return;
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
-    if (window.levelButtons) {
-        for (let btn of window.levelButtons) {
-            if (mx >= btn.x && mx <= btn.x + btn.width && my >= btn.y && my <= btn.y + btn.height) {
-                loadLevel(btn.level);
-                updateStats();
-                break;
+    
+    // Main menu interactions
+    if (gameState === 'menu') {
+        if (window.menuButtons) {
+            for (let btn of window.menuButtons) {
+                if (mx >= btn.x && mx <= btn.x + btn.width && my >= btn.y && my <= btn.y + btn.height) {
+                    if (btn.action === 'startGame') {
+                        gameState = 'levelSelect';
+                    } else if (btn.action === 'settings') {
+                        gameState = 'settings';
+                    }
+                    break;
+                }
             }
         }
+        return;
     }
+
+    // Level selection interactions
+    if (gameState === 'levelSelect') {
+        // Check level buttons
+        if (window.levelButtons) {
+            for (let btn of window.levelButtons) {
+                if (mx >= btn.x && mx <= btn.x + btn.width && my >= btn.y && my <= btn.y + btn.height) {
+                    loadLevel(btn.level);
+                    updateStats();
+                    break;
+                }
+            }
+        }
+        
+        // Check back button
+        if (window.backButton && 
+            mx >= window.backButton.x && mx <= window.backButton.x + window.backButton.width &&
+            my >= window.backButton.y && my <= window.backButton.y + window.backButton.height) {
+            gameState = 'menu';
+        }
+        return;
+    }
+
+    // Settings interactions
+    if (gameState === 'settings') {
+        // Check back button first
+        if (window.backButton && 
+            mx >= window.backButton.x && mx <= window.backButton.x + window.backButton.width &&
+            my >= window.backButton.y && my <= window.backButton.y + window.backButton.height) {
+            gameState = 'menu';
+            return;
+        }
+        
+        // Check volume sliders
+        if (window.volumeSliders) {
+            for (let slider of window.volumeSliders) {
+                if (mx >= slider.x && mx <= slider.x + slider.width &&
+                    my >= slider.y && my <= slider.y + slider.height) {
+                    // Start dragging
+                    isDragging = true;
+                    dragSlider = slider;
+                    
+                    // Also set initial value
+                    const clickPos = (mx - slider.x) / slider.width;
+                    const newVolume = Math.max(0, Math.min(1, clickPos));
+                    
+                    if (slider.type === 'master') {
+                        setMasterVolume(newVolume);
+                    } else if (slider.type === 'music') {
+                        setMusicVolume(newVolume);
+                    } else if (slider.type === 'sfx') {
+                        setSfxVolume(newVolume);
+                    }
+                    break;
+                }
+            }
+        }
+        return;
+    }
+});
+
+canvas.addEventListener('mousemove', function(e) {
+    if (!isDragging || !dragSlider || gameState !== 'settings') return;
+    
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    
+    const clickPos = (mx - dragSlider.x) / dragSlider.width;
+    const newVolume = Math.max(0, Math.min(1, clickPos));
+    
+    if (dragSlider.type === 'master') {
+        setMasterVolume(newVolume);
+    } else if (dragSlider.type === 'music') {
+        setMusicVolume(newVolume);
+    } else if (dragSlider.type === 'sfx') {
+        setSfxVolume(newVolume);
+    }
+});
+
+canvas.addEventListener('mouseup', function() {
+    isDragging = false;
+    dragSlider = null;
 });
 
 // Start the game

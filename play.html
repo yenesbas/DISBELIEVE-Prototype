@@ -52,29 +52,16 @@
             <p><strong>← / →</strong> or <strong>A / D</strong> Move | <strong>Space</strong> or <strong>W</strong> Jump | <strong>R</strong> Restart | <strong>ESC</strong> Menu</p>
             <p style="font-size: 20px;">⚠️ <span style="color: #ff4444">DISBELIEVE</span> <span style="color: #8c44ff">what you see!</span></p>
             <p style="color: #44ff44;">🚪 Reach the green door to complete the level!</p>
+            <p style="color: #aaa; font-size: 14px;">Tip: Click to interact and enable audio on some browsers</p>
         </div>
         <canvas id="gameCanvas" width="1200" height="720"></canvas>
         <div id="stats">
             <div id="levelName" style="color: #aaa; font-size: 20px; margin-bottom: 5px;">Select a level to begin</div>
             <div id="deathCount">Deaths: 0</div>
         </div>
-        <!-- Audio controls -->
-        <div id="audioControls" style="color:#ccc; font-size:14px; width:1200px; display:flex; gap:12px; justify-content:space-between; align-items:center;">
-            <div style="display:flex; flex-direction:column; align-items:flex-start;">
-                <label for="masterVol">Master Volume</label>
-                <input id="masterVol" type="range" min="0" max="1" step="0.01" value="1">
-            </div>
-            <div style="display:flex; flex-direction:column; align-items:flex-start;">
-                <label for="musicVol">Music Volume</label>
-                <input id="musicVol" type="range" min="0" max="1" step="0.01" value="0.25">
-            </div>
-            <div style="display:flex; flex-direction:column; align-items:flex-start;">
-                <label for="sfxVol">SFX Volume</label>
-                <input id="sfxVol" type="range" min="0" max="1" step="0.01" value="1">
-            </div>
-            <div style="color:#999; font-size:12px;">Tip: interact (press a key) to allow audio autoplay on some browsers.</div>
-        </div>
     </div>
     <script src="src/game.js"></script>
 </body>
 </html>
+
+
