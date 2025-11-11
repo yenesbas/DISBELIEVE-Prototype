@@ -476,7 +476,8 @@ function getCurrentLevelInfo() {
 }
 
 // Game state
-let gameState = 'menu'; // 'menu', 'settings', 'chapterSelect', 'levelSelect', 'playing', 'levelComplete'
+let gameState = 'menu'; // 'menu', 'settings', 'chapterSelect', 'levelSelect', 'playing', 'levelComplete', 'paused'
+let previousGameState = null; // Store previous state to return to after settings
 let currentChapter = 0;
 let currentLevel = 0;
 let currentLevelInChapter = 0; // 0-based index within the current chapter
@@ -493,8 +494,31 @@ let levelCompleteTimer = 0;
 const DEATH_FLASH_DURATION = 0.2;
 const LEVEL_COMPLETE_DURATION = 1.5;
 
+// Transition animations
+let transitionState = 'none'; // 'none', 'fadeOut', 'fadeIn'
+let transitionAlpha = 0;
+let transitionSpeed = 3; // Speed of fade transitions
+let pendingGameState = null; // State to transition to after fade out
+
 // Level progression system
 let completedLevels = new Set(); // Stores global level indices that have been completed
+let levelStars = {}; // Stores star ratings (1-3) for each level: { globalLevelIndex: stars }
+
+// Star rating thresholds (deaths required for each star)
+const STAR_THRESHOLDS = {
+  3: 0,   // 3 stars: 0 deaths (perfect!)
+  2: 3,   // 2 stars: 1-3 deaths
+  1: 10   // 1 star: 4-10 deaths
+  // 0 stars: more than 10 deaths
+};
+
+// Calculate stars based on deaths in current level
+function calculateStars(deaths) {
+  if (deaths === STAR_THRESHOLDS[3]) return 3;
+  if (deaths <= STAR_THRESHOLDS[2]) return 2;
+  if (deaths <= STAR_THRESHOLDS[1]) return 1;
+  return 0;
+}
 
 // Load/save progress from localStorage
 function loadProgress() {
@@ -503,6 +527,7 @@ function loadProgress() {
     if (saved) {
       const parsed = JSON.parse(saved);
       completedLevels = new Set(parsed.completedLevels || []);
+      levelStars = parsed.levelStars || {};
     }
   } catch (e) {
     console.warn('Could not load progress:', e);
@@ -512,7 +537,8 @@ function loadProgress() {
 function saveProgress() {
   try {
     const data = {
-      completedLevels: Array.from(completedLevels)
+      completedLevels: Array.from(completedLevels),
+      levelStars: levelStars
     };
     localStorage.setItem('disbelieveProgress', JSON.stringify(data));
   } catch (e) {
@@ -533,7 +559,24 @@ function isLevelUnlocked(chapterIndex, levelInChapter) {
 
 function markLevelComplete(globalIndex) {
   completedLevels.add(globalIndex);
+  
+  // Calculate and save star rating
+  const stars = calculateStars(levelDeaths);
+  const currentStars = levelStars[globalIndex] || 0;
+  
+  // Only update if new rating is better
+  if (stars > currentStars) {
+    levelStars[globalIndex] = stars;
+  }
+  
   saveProgress();
+}
+
+// Helper function to start a transition to a new game state
+function transitionToState(newState) {
+  pendingGameState = newState;
+  transitionState = 'fadeOut';
+  transitionAlpha = 0;
 }
 
 // MASTER DEBUG SWITCH - Set to false to disable ALL debug features
@@ -756,6 +799,25 @@ function resetPlayer() {
 
 // Update game state
 function update(deltaTime) {
+  // Handle transitions
+  if (transitionState === 'fadeOut') {
+    transitionAlpha += transitionSpeed * deltaTime;
+    if (transitionAlpha >= 1) {
+      transitionAlpha = 1;
+      transitionState = 'fadeIn';
+      gameState = pendingGameState;
+      pendingGameState = null;
+    }
+    return; // Don't update game during transition
+  } else if (transitionState === 'fadeIn') {
+    transitionAlpha -= transitionSpeed * deltaTime;
+    if (transitionAlpha <= 0) {
+      transitionAlpha = 0;
+      transitionState = 'none';
+    }
+    return; // Don't update game during transition
+  }
+
   // Menu state
   if (gameState === 'menu') {
     return;
@@ -773,6 +835,11 @@ function update(deltaTime) {
 
   // Level selection state
   if (gameState === 'levelSelect') {
+    return;
+  }
+
+  // Paused state
+  if (gameState === 'paused') {
     return;
   }
 
@@ -814,8 +881,13 @@ function update(deltaTime) {
     return;
   }
 
+  // Only update game logic if we're actually playing (not paused)
+  if (gameState !== 'playing') {
+    return;
+  }
+
   if (isPaused) {
-    return; // Skip update if game is paused
+    return; // Skip update if game is paused due to window blur
   }
 
   // Horizontal movement
@@ -1031,26 +1103,33 @@ function render() {
   // Menu screen
   if (gameState === 'menu') {
     drawMenu();
+    renderTransition();
     return;
   }
 
   // Settings screen
   if (gameState === 'settings') {
     drawSettings();
+    renderTransition();
     return;
   }
 
   // Chapter selection screen
   if (gameState === 'chapterSelect') {
     drawChapterSelect();
+    renderTransition();
     return;
   }
 
   // Level selection screen
   if (gameState === 'levelSelect') {
     drawLevelSelect();
+    renderTransition();
     return;
   }
+
+  // Don't return early for paused - we need to draw the game first
+  // Then we'll draw the pause menu overlay on top
 
   // Draw platforms (solid blocks)
   ctx.fillStyle = '#666';
@@ -1150,7 +1229,7 @@ function render() {
   });
 
   // Draw player
-  if (!isDead && gameState === 'playing') {
+  if (!isDead && (gameState === 'playing' || gameState === 'paused')) {
     ctx.fillStyle = '#4488ff';
     ctx.fillRect(player.x, player.y, player.width, player.height);
 
@@ -1169,7 +1248,7 @@ function render() {
   }
 
   // Death flash
-  if (isDead && deathFlashTimer > 0) {
+  if (isDead && deathFlashTimer > 0 && gameState === 'playing') {
     ctx.fillStyle = `rgba(255, 0, 0, ${deathFlashTimer / DEATH_FLASH_DURATION * 0.5})`;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -1187,21 +1266,154 @@ function render() {
     ctx.fillStyle = '#44ff44';
     ctx.font = 'bold 48px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText('Level Complete!', canvas.width / 2, canvas.height / 2);
+    ctx.fillText('Level Complete!', canvas.width / 2, canvas.height / 2 - 60);
+    
+    // Show star rating
+    const stars = calculateStars(levelDeaths);
+    const starDisplay = '★'.repeat(stars) + '☆'.repeat(3 - stars);
+    ctx.fillStyle = '#ffdd44';
+    ctx.font = 'bold 64px Arial';
+    ctx.fillText(starDisplay, canvas.width / 2, canvas.height / 2 + 10);
+    
+    // Show death count
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '24px Arial';
+    ctx.fillText(`Deaths this level: ${levelDeaths}`, canvas.width / 2, canvas.height / 2 + 60);
 
     ctx.font = '24px Arial';
     ctx.fillStyle = '#ffffff';
     if (currentLevel < levels.length - 1) {
-      ctx.fillText('Next level loading...', canvas.width / 2, canvas.height / 2 + 50);
+      ctx.fillText('Next level loading...', canvas.width / 2, canvas.height / 2 + 100);
     } else {
-      ctx.fillText('You beat all levels!', canvas.width / 2, canvas.height / 2 + 50);
-      ctx.fillText(`Total Deaths: ${deaths}`, canvas.width / 2, canvas.height / 2 + 85);
+      ctx.fillText('You beat all levels!', canvas.width / 2, canvas.height / 2 + 100);
+      ctx.fillText(`Total Deaths: ${deaths}`, canvas.width / 2, canvas.height / 2 + 135);
     }
     ctx.textAlign = 'left';
   }
 
   // Update trigger info display below canvas
   updateTriggerInfo();
+  
+  // Draw pause menu overlay if paused (must be after game is drawn)
+  if (gameState === 'paused') {
+    console.log('Drawing pause menu!'); // DEBUG
+    drawPauseMenu();
+  }
+  
+  // Render transition overlay last (on top of everything)
+  renderTransition();
+}
+
+// Render transition fade effect
+function renderTransition() {
+  if (transitionState !== 'none' && transitionAlpha > 0) {
+    ctx.fillStyle = `rgba(0, 0, 0, ${transitionAlpha})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+}
+
+// Draw pause menu
+function drawPauseMenu() {
+  // Semi-transparent dark overlay over the game
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Pause menu title
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 72px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('PAUSED', canvas.width / 2, 180);
+
+  // Pause menu buttons
+  window.pauseButtons = [];
+  
+  const buttonWidth = 300;
+  const buttonHeight = 60;
+  const buttonX = canvas.width / 2 - buttonWidth / 2;
+  let buttonY = 280;
+  const buttonSpacing = 80;
+
+  // Resume button
+  ctx.fillStyle = '#444444';
+  ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
+  ctx.strokeStyle = '#888888';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 36px Arial';
+  ctx.fillText('RESUME', canvas.width / 2, buttonY + 40);
+  
+  window.pauseButtons.push({
+    x: buttonX,
+    y: buttonY,
+    width: buttonWidth,
+    height: buttonHeight,
+    action: 'resume'
+  });
+
+  // Restart button
+  buttonY += buttonSpacing;
+  ctx.fillStyle = '#444444';
+  ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
+  ctx.strokeStyle = '#888888';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 36px Arial';
+  ctx.fillText('RESTART', canvas.width / 2, buttonY + 40);
+  
+  window.pauseButtons.push({
+    x: buttonX,
+    y: buttonY,
+    width: buttonWidth,
+    height: buttonHeight,
+    action: 'restart'
+  });
+
+  // Settings button
+  buttonY += buttonSpacing;
+  ctx.fillStyle = '#444444';
+  ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
+  ctx.strokeStyle = '#888888';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 36px Arial';
+  ctx.fillText('SETTINGS', canvas.width / 2, buttonY + 40);
+  
+  window.pauseButtons.push({
+    x: buttonX,
+    y: buttonY,
+    width: buttonWidth,
+    height: buttonHeight,
+    action: 'settings'
+  });
+
+  // Quit to Menu button
+  buttonY += buttonSpacing;
+  ctx.fillStyle = '#444444';
+  ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
+  ctx.strokeStyle = '#888888';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 36px Arial';
+  ctx.fillText('QUIT TO MENU', canvas.width / 2, buttonY + 40);
+  
+  window.pauseButtons.push({
+    x: buttonX,
+    y: buttonY,
+    width: buttonWidth,
+    height: buttonHeight,
+    action: 'quit'
+  });
+
+  // Instructions
+  ctx.fillStyle = '#aaaaaa';
+  ctx.font = '24px Arial';
+  ctx.fillText('ESC to Resume', canvas.width / 2, canvas.height - 40);
+
+  ctx.textAlign = 'left';
 }
 
 // Draw main menu
@@ -1425,8 +1637,16 @@ function drawLevelSelect() {
       ctx.fillStyle = '#555555';
       ctx.font = '32px Arial';
       ctx.fillText('🔒', canvas.width / 2 - 263 + x * 120, y + 23);
+    } else if (isCompleted) {
+      // Show star rating for completed levels
+      const globalIndex = getGlobalLevelIndex(currentChapter, i);
+      const stars = levelStars[globalIndex] || 0;
+      ctx.fillStyle = '#ffdd44';
+      ctx.font = '24px Arial';
+      const starText = '★'.repeat(stars) + '☆'.repeat(3 - stars);
+      ctx.fillText(starText, canvas.width / 2 - 268 + x * 120, y + 23);
     } else {
-      // Button hint for unlocked levels
+      // Button hint for unlocked but not completed levels
       ctx.fillStyle = '#888888';
       ctx.font = '22px Arial';
       if (i < 9) {
@@ -1638,20 +1858,20 @@ document.addEventListener('keydown', (e) => {
     if (e.code === 'Digit1' || e.code === 'Numpad1') {
       if (chapters.length >= 1) {
         currentChapter = 0;
-        gameState = 'levelSelect';
+        transitionToState('levelSelect');
       }
     } else if (e.code === 'Digit2' || e.code === 'Numpad2') {
       if (chapters.length >= 2) {
         currentChapter = 1;
-        gameState = 'levelSelect';
+        transitionToState('levelSelect');
       }
     } else if (e.code === 'Digit3' || e.code === 'Numpad3') {
       if (chapters.length >= 3) {
         currentChapter = 2;
-        gameState = 'levelSelect';
+        transitionToState('levelSelect');
       }
     } else if (e.code === 'Escape') {
-      gameState = 'menu';
+      transitionToState('menu');
     }
     return;
   }
@@ -1709,7 +1929,7 @@ document.addEventListener('keydown', (e) => {
         updateStats();
       }
     } else if (e.code === 'Escape') {
-      gameState = 'chapterSelect';
+      transitionToState('chapterSelect');
     }
     return;
   }
@@ -1717,7 +1937,18 @@ document.addEventListener('keydown', (e) => {
   // Settings controls
   if (gameState === 'settings') {
     if (e.code === 'Escape') {
-      gameState = 'menu';
+      // Return to previous state (could be menu or paused)
+      transitionToState(previousGameState || 'menu');
+      previousGameState = null;
+    }
+    return;
+  }
+
+  // Pause menu controls
+  if (gameState === 'paused') {
+    if (e.code === 'Escape') {
+      gameState = 'playing';
+      resumeGame();
     }
     return;
   }
@@ -1732,14 +1963,28 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.code === 'KeyR') keys.r = true;
 
-  // ESC to return to chapter select
+  // ESC to pause/unpause game
   if (e.code === 'Escape') {
-    gameState = 'chapterSelect';
-    currentLevel = 0;
-    currentLevelInChapter = 0;
-    deaths = 0;
-    levelDeaths = 0;
-    updateStats();
+    if (gameState === 'playing') {
+      // Pause the game
+      gameState = 'paused';
+      // Stop player movement
+      keys.left = false;
+      keys.right = false;
+      keys.space = false;
+      keys.r = false;
+      if (player) {
+        player.vx = 0;
+      }
+    } else if (gameState === 'paused') {
+      // Resume the game
+      gameState = 'playing';
+      lastTime = performance.now();
+    } else if (gameState === 'settings') {
+      // Return from settings
+      gameState = previousGameState || 'menu';
+      previousGameState = null;
+    }
   }
 
   // Toggle DEBUG_MODE with 'T' key (only if debug features are enabled)
@@ -1771,9 +2016,10 @@ canvas.addEventListener('mousedown', function(e) {
             for (let btn of window.menuButtons) {
                 if (mx >= btn.x && mx <= btn.x + btn.width && my >= btn.y && my <= btn.y + btn.height) {
                     if (btn.action === 'startGame') {
-                        gameState = 'chapterSelect';
+                        transitionToState('chapterSelect');
                     } else if (btn.action === 'settings') {
-                        gameState = 'settings';
+                        previousGameState = 'menu'; // Remember we came from main menu
+                        transitionToState('settings');
                     }
                     break;
                 }
@@ -1789,7 +2035,7 @@ canvas.addEventListener('mousedown', function(e) {
             for (let btn of window.chapterButtons) {
                 if (mx >= btn.x && mx <= btn.x + btn.width && my >= btn.y && my <= btn.y + btn.height) {
                     currentChapter = btn.chapter;
-                    gameState = 'levelSelect';
+                    transitionToState('levelSelect');
                     break;
                 }
             }
@@ -1799,7 +2045,7 @@ canvas.addEventListener('mousedown', function(e) {
         if (window.backButton && 
             mx >= window.backButton.x && mx <= window.backButton.x + window.backButton.width &&
             my >= window.backButton.y && my <= window.backButton.y + window.backButton.height) {
-            gameState = 'menu';
+            transitionToState('menu');
         }
         return;
     }
@@ -1824,7 +2070,39 @@ canvas.addEventListener('mousedown', function(e) {
         if (window.backButton && 
             mx >= window.backButton.x && mx <= window.backButton.x + window.backButton.width &&
             my >= window.backButton.y && my <= window.backButton.y + window.backButton.height) {
-            gameState = 'chapterSelect';
+            transitionToState('chapterSelect');
+        }
+        return;
+    }
+
+    // Pause menu interactions
+    if (gameState === 'paused') {
+        if (window.pauseButtons) {
+            for (let btn of window.pauseButtons) {
+                if (mx >= btn.x && mx <= btn.x + btn.width && my >= btn.y && my <= btn.y + btn.height) {
+                    if (btn.action === 'resume') {
+                        gameState = 'playing';
+                        resumeGame();
+                    } else if (btn.action === 'restart') {
+                        resetPlayer();
+                        levelDeaths = 0;
+                        gameState = 'playing';
+                        resumeGame();
+                        updateStats();
+                    } else if (btn.action === 'settings') {
+                        previousGameState = 'paused'; // Remember we came from pause menu
+                        transitionToState('settings');
+                    } else if (btn.action === 'quit') {
+                        transitionToState('chapterSelect');
+                        currentLevel = 0;
+                        currentLevelInChapter = 0;
+                        deaths = 0;
+                        levelDeaths = 0;
+                        updateStats();
+                    }
+                    break;
+                }
+            }
         }
         return;
     }
@@ -1835,7 +2113,9 @@ canvas.addEventListener('mousedown', function(e) {
         if (window.backButton && 
             mx >= window.backButton.x && mx <= window.backButton.x + window.backButton.width &&
             my >= window.backButton.y && my <= window.backButton.y + window.backButton.height) {
-            gameState = 'menu';
+            // Return to previous state (could be menu or paused)
+            transitionToState(previousGameState || 'menu');
+            previousGameState = null;
             return;
         }
         
