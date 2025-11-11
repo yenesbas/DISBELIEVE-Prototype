@@ -412,15 +412,33 @@ const chapters = [
         spikeTriggerLengths: [250, 200, 1, 200, 1.05, 1.1, 150, 2, 150, 4, 5, 6, 7, 400, 9]  // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
       }
     ]
-  }
+  },
   // Future chapters can be added here:
-  // {
-  //   name: "Chapter 2: Advanced Illusions",
-  //   description: "Master the art of disbelief",
-  //   levels: [
-  //     // 10 more levels here...
-  //   ]
-  // }
+  {
+    name: "Chapter 2: Advanced Illusions",
+    description: "Master the art of disbelief",
+    levels: [
+      {
+        name: "Level 1: Chapter 2 Intro",
+        map: [
+          "....................",
+          ".....2..3...3.......",
+          "#.######F##########.",
+          ".#......F...#.....#.",
+          "..F##F..F...#.....#.",
+          "..#..#..#.....#.....",
+          "1.#11#12#.3...#2.2#.",
+          "F############.#####.",
+          "............#.......",
+          "............F.....D.",
+          "#.F..#..F..#########",
+          "..#..#..#..........."
+        ],
+        spikeTriggers: [-0.5, -4, 0, -1.5, -5.1, -3.2, -1, -3, -1, -3, -2.5],           // Horizontal offsets
+        spikeTriggerLengths: [250, 251, 252, 120, 1.05, 1.1, 151, 160, 150, 80, 180]  // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
+      }
+    ]
+  }
 ];
 
 // Legacy compatibility - flatten chapters into single levels array for backwards compatibility
