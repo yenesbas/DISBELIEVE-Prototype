@@ -493,6 +493,49 @@ let levelCompleteTimer = 0;
 const DEATH_FLASH_DURATION = 0.2;
 const LEVEL_COMPLETE_DURATION = 1.5;
 
+// Level progression system
+let completedLevels = new Set(); // Stores global level indices that have been completed
+
+// Load/save progress from localStorage
+function loadProgress() {
+  try {
+    const saved = localStorage.getItem('disbelieveProgress');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      completedLevels = new Set(parsed.completedLevels || []);
+    }
+  } catch (e) {
+    console.warn('Could not load progress:', e);
+  }
+}
+
+function saveProgress() {
+  try {
+    const data = {
+      completedLevels: Array.from(completedLevels)
+    };
+    localStorage.setItem('disbelieveProgress', JSON.stringify(data));
+  } catch (e) {
+    console.warn('Could not save progress:', e);
+  }
+}
+
+function isLevelUnlocked(chapterIndex, levelInChapter) {
+  // First level of first chapter is always unlocked
+  if (chapterIndex === 0 && levelInChapter === 0) return true;
+  
+  // Check if previous level is completed
+  const globalIndex = getGlobalLevelIndex(chapterIndex, levelInChapter);
+  const previousGlobalIndex = globalIndex - 1;
+  
+  return completedLevels.has(previousGlobalIndex);
+}
+
+function markLevelComplete(globalIndex) {
+  completedLevels.add(globalIndex);
+  saveProgress();
+}
+
 // MASTER DEBUG SWITCH - Set to false to disable ALL debug features
 const ENABLE_DEBUG_FEATURES = true;
 
@@ -535,6 +578,7 @@ function resumeGame() {
 
 // Initialize game
 function init() {
+  loadProgress(); // Load saved progress
   setupAudioControls();
   // Attempt to enable audio when the user interacts (click or key) to satisfy browser autoplay policies
   document.addEventListener('click', tryEnableAudio, { once: true });
@@ -889,6 +933,10 @@ function update(deltaTime) {
 function completeLevel() {
   gameState = 'levelComplete';
   levelCompleteTimer = LEVEL_COMPLETE_DURATION;
+  
+  // Mark this level as completed
+  markLevelComplete(currentLevel);
+  
   // Play appropriate completion sound: normal level end, but if this is the final level play chapter end
   tryEnableAudio();
   if (currentLevel < levels.length - 1) {
@@ -1342,25 +1390,50 @@ function drawLevelSelect() {
     let bx = canvas.width / 2 - 300 + x * 120;
     let by = y - 52;
     
-    // Draw button
-    ctx.fillStyle = '#444444';
+    // Check if level is unlocked
+    const isUnlocked = isLevelUnlocked(currentChapter, i);
+    const isCompleted = completedLevels.has(getGlobalLevelIndex(currentChapter, i));
+    
+    // Draw button - darker if locked
+    if (isUnlocked) {
+      ctx.fillStyle = '#444444';
+    } else {
+      ctx.fillStyle = '#222222'; // Much darker for locked levels
+    }
     ctx.fillRect(bx, by, 90, 90);
-    ctx.strokeStyle = '#888888';
+    
+    // Border - different color for locked
+    if (isUnlocked) {
+      ctx.strokeStyle = isCompleted ? '#44ff44' : '#888888'; // Green border if completed
+    } else {
+      ctx.strokeStyle = '#444444'; // Dark border for locked
+    }
     ctx.lineWidth = 4;
     ctx.strokeRect(bx, by, 90, 90);
 
-    // Button text
-    ctx.fillStyle = '#ffffff';
+    // Button text - grayed out if locked
+    if (isUnlocked) {
+      ctx.fillStyle = isCompleted ? '#44ff44' : '#ffffff';
+    } else {
+      ctx.fillStyle = '#555555'; // Very dark gray for locked
+    }
     ctx.font = '36px Arial';
     ctx.fillText(i+1, canvas.width / 2 - 255 + x * 120, y - 7);
 
-    // Button hint
-    ctx.fillStyle = '#888888';
-    ctx.font = '22px Arial';
-    if (i < 9) {
-      ctx.fillText(`Press ${i + 1}`, canvas.width / 2 - 255 + x * 120, y + 23);
+    // Lock icon for locked levels
+    if (!isUnlocked) {
+      ctx.fillStyle = '#555555';
+      ctx.font = '32px Arial';
+      ctx.fillText('🔒', canvas.width / 2 - 263 + x * 120, y + 23);
     } else {
-      ctx.fillText(`Press 0`, canvas.width / 2 - 255 + x * 120, y + 23);
+      // Button hint for unlocked levels
+      ctx.fillStyle = '#888888';
+      ctx.font = '22px Arial';
+      if (i < 9) {
+        ctx.fillText(`Press ${i + 1}`, canvas.width / 2 - 255 + x * 120, y + 23);
+      } else {
+        ctx.fillText(`Press 0`, canvas.width / 2 - 255 + x * 120, y + 23);
+      }
     }
     
     window.levelButtons.push({
@@ -1368,7 +1441,8 @@ function drawLevelSelect() {
       y: by,
       width: 90,
       height: 90,
-      levelInChapter: i
+      levelInChapter: i,
+      isUnlocked: isUnlocked
     });
     x++;
   }
@@ -1585,35 +1659,55 @@ document.addEventListener('keydown', (e) => {
   // Level selection controls
   if (gameState === 'levelSelect') {
     if (e.code === 'Digit1' || e.code === 'Numpad1') {
-      loadLevelFromChapter(currentChapter, 0);
-      updateStats();
+      if (isLevelUnlocked(currentChapter, 0)) {
+        loadLevelFromChapter(currentChapter, 0);
+        updateStats();
+      }
     } else if (e.code === 'Digit2' || e.code === 'Numpad2') {
-      loadLevelFromChapter(currentChapter, 1);
-      updateStats();
+      if (isLevelUnlocked(currentChapter, 1)) {
+        loadLevelFromChapter(currentChapter, 1);
+        updateStats();
+      }
     } else if (e.code === 'Digit3' || e.code === 'Numpad3') {
-      loadLevelFromChapter(currentChapter, 2);
-      updateStats();
+      if (isLevelUnlocked(currentChapter, 2)) {
+        loadLevelFromChapter(currentChapter, 2);
+        updateStats();
+      }
     } else if (e.code === 'Digit4' || e.code === 'Numpad4') {
-      loadLevelFromChapter(currentChapter, 3);
-      updateStats();
+      if (isLevelUnlocked(currentChapter, 3)) {
+        loadLevelFromChapter(currentChapter, 3);
+        updateStats();
+      }
     } else if (e.code === 'Digit5' || e.code === 'Numpad5') {
-      loadLevelFromChapter(currentChapter, 4);
-      updateStats();
+      if (isLevelUnlocked(currentChapter, 4)) {
+        loadLevelFromChapter(currentChapter, 4);
+        updateStats();
+      }
     } else if (e.code === 'Digit6' || e.code === 'Numpad6') {
-      loadLevelFromChapter(currentChapter, 5);
-      updateStats();
+      if (isLevelUnlocked(currentChapter, 5)) {
+        loadLevelFromChapter(currentChapter, 5);
+        updateStats();
+      }
     } else if (e.code === 'Digit7' || e.code === 'Numpad7') {
-      loadLevelFromChapter(currentChapter, 6);
-      updateStats();
+      if (isLevelUnlocked(currentChapter, 6)) {
+        loadLevelFromChapter(currentChapter, 6);
+        updateStats();
+      }
     } else if (e.code === 'Digit8' || e.code === 'Numpad8') {
-      loadLevelFromChapter(currentChapter, 7);
-      updateStats();
+      if (isLevelUnlocked(currentChapter, 7)) {
+        loadLevelFromChapter(currentChapter, 7);
+        updateStats();
+      }
     } else if (e.code === 'Digit9' || e.code === 'Numpad9') {
-      loadLevelFromChapter(currentChapter, 8);
-      updateStats();
+      if (isLevelUnlocked(currentChapter, 8)) {
+        loadLevelFromChapter(currentChapter, 8);
+        updateStats();
+      }
     } else if (e.code === 'Digit0' || e.code === 'Numpad0') {
-      loadLevelFromChapter(currentChapter, 9);
-      updateStats();
+      if (isLevelUnlocked(currentChapter, 9)) {
+        loadLevelFromChapter(currentChapter, 9);
+        updateStats();
+      }
     } else if (e.code === 'Escape') {
       gameState = 'chapterSelect';
     }
@@ -1716,8 +1810,11 @@ canvas.addEventListener('mousedown', function(e) {
         if (window.levelButtons) {
             for (let btn of window.levelButtons) {
                 if (mx >= btn.x && mx <= btn.x + btn.width && my >= btn.y && my <= btn.y + btn.height) {
-                    loadLevelFromChapter(currentChapter, btn.levelInChapter);
-                    updateStats();
+                    // Only allow clicking unlocked levels
+                    if (btn.isUnlocked) {
+                        loadLevelFromChapter(currentChapter, btn.levelInChapter);
+                        updateStats();
+                    }
                     break;
                 }
             }
