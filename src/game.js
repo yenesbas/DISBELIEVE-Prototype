@@ -1257,7 +1257,7 @@ function render() {
       
       // Add text label
       ctx.fillStyle = 'cyan';
-      ctx.font = '14px Arial';
+      ctx.font = '14px monospace';
       ctx.textAlign = 'center';
       ctx.fillText('I', platform.x + platform.width/2, platform.y + platform.height/2 + 5);
     });
@@ -1312,7 +1312,7 @@ function render() {
 
       // Draw small label showing trigger offset and length
       ctx.fillStyle = 'rgba(255, 255, 0, 0.6)';
-      ctx.font = '12px Arial';
+      ctx.font = '12px monospace';
       let lengthLabel;
       if (spike.triggerLength === null || spike.triggerLength === 0) {
         lengthLabel = 'full';
@@ -1377,7 +1377,7 @@ function render() {
 
     // Draw "X_X" face (scaled)
     ctx.fillStyle = '#ff0000';
-    ctx.font = 'bold 36px Arial';
+    ctx.font = 'bold 36px monospace';
     ctx.fillText('X_X', player.x - 8, player.y + 30);
   }
 
@@ -1387,7 +1387,7 @@ function render() {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.fillStyle = '#44ff44';
-    ctx.font = 'bold 48px Arial';
+    ctx.font = 'bold 48px Impact, monospace';
     ctx.textAlign = 'center';
     ctx.fillText('Level Complete!', canvas.width / 2, canvas.height / 2 - 60);
     
@@ -1395,15 +1395,15 @@ function render() {
     const stars = calculateStars(levelDeaths);
     const starDisplay = '★'.repeat(stars) + '☆'.repeat(3 - stars);
     ctx.fillStyle = '#ffdd44';
-    ctx.font = 'bold 64px Arial';
+    ctx.font = 'bold 64px monospace';
     ctx.fillText(starDisplay, canvas.width / 2, canvas.height / 2 + 10);
     
     // Show death count
     ctx.fillStyle = '#ffffff';
-    ctx.font = '24px Arial';
+    ctx.font = '24px monospace';
     ctx.fillText(`Deaths this level: ${levelDeaths}`, canvas.width / 2, canvas.height / 2 + 60);
 
-    ctx.font = '24px Arial';
+    ctx.font = '24px monospace';
     ctx.fillStyle = '#ffffff';
     if (currentLevel < levels.length - 1) {
       ctx.fillText('Next level loading...', canvas.width / 2, canvas.height / 2 + 100);
@@ -1443,7 +1443,7 @@ function drawPauseMenu() {
 
   // Pause menu title
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 72px Arial';
+  ctx.font = 'bold 72px Impact, monospace';
   ctx.textAlign = 'center';
   ctx.fillText('PAUSED', canvas.width / 2, 180);
 
@@ -1463,7 +1463,8 @@ function drawPauseMenu() {
   ctx.lineWidth = 3;
   ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 36px Arial';
+  ctx.font = 'bold 36px Impact, monospace';
+  ctx.textAlign = 'center';
   ctx.fillText('RESUME', canvas.width / 2, buttonY + 40);
   
   window.pauseButtons.push({
@@ -1482,7 +1483,7 @@ function drawPauseMenu() {
   ctx.lineWidth = 3;
   ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 36px Arial';
+  ctx.font = 'bold 36px Impact, monospace';
   ctx.fillText('RESTART', canvas.width / 2, buttonY + 40);
   
   window.pauseButtons.push({
@@ -1501,7 +1502,7 @@ function drawPauseMenu() {
   ctx.lineWidth = 3;
   ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 36px Arial';
+  ctx.font = 'bold 36px Impact, monospace';
   ctx.fillText('SETTINGS', canvas.width / 2, buttonY + 40);
   
   window.pauseButtons.push({
@@ -1520,7 +1521,7 @@ function drawPauseMenu() {
   ctx.lineWidth = 3;
   ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 36px Arial';
+  ctx.font = 'bold 36px Impact, monospace';
   ctx.fillText('QUIT TO MENU', canvas.width / 2, buttonY + 40);
   
   window.pauseButtons.push({
@@ -1533,7 +1534,7 @@ function drawPauseMenu() {
 
   // Instructions
   ctx.fillStyle = '#aaaaaa';
-  ctx.font = '24px Arial';
+  ctx.font = '24px monospace';
   ctx.fillText('ESC to Resume', canvas.width / 2, canvas.height - 40);
 
   ctx.textAlign = 'left';
@@ -1546,13 +1547,13 @@ function drawMenu() {
 
   // Title
   ctx.fillStyle = '#9844ffff';
-  ctx.font = 'bold 96px Arial';
+  ctx.font = 'bold 96px Impact, monospace';
   ctx.textAlign = 'center';
   ctx.fillText('DISBELIEVE', canvas.width / 2, 150);
 
   // Subtitle
   ctx.fillStyle = '#ffffff';
-  ctx.font = '30px Arial';
+  ctx.font = '30px monospace';
   ctx.fillText('Can you survive the deception?', canvas.width / 2, 210);
 
   // Menu buttons
@@ -1568,7 +1569,7 @@ function drawMenu() {
   ctx.strokeRect(startX, startY, 300, 60);
   
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 36px Arial';
+  ctx.font = 'bold 36px Impact, monospace';
   ctx.fillText('START GAME', canvas.width / 2, startY + 40);
   
   window.menuButtons.push({
@@ -1588,7 +1589,7 @@ function drawMenu() {
   ctx.strokeRect(startX, settingsY, 300, 60);
   
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 36px Arial';
+  ctx.font = 'bold 36px Impact, monospace';
   ctx.fillText('SETTINGS', canvas.width / 2, settingsY + 40);
   
   window.menuButtons.push({
@@ -1601,7 +1602,7 @@ function drawMenu() {
 
   // Instructions
   ctx.fillStyle = '#666666';
-  ctx.font = '26px Arial';
+  ctx.font = '26px monospace';
   ctx.fillText('Hint: DISBELIEVE WHAT YOU SEE', canvas.width / 2, canvas.height - 50);
 
   ctx.textAlign = 'left';
@@ -1614,7 +1615,7 @@ function drawChapterSelect() {
 
   // Title
   ctx.fillStyle = '#9844ffff';
-  ctx.font = 'bold 72px Arial';
+  ctx.font = 'bold 72px Impact, monospace';
   ctx.textAlign = 'center';
   ctx.fillText('SELECT CHAPTER', canvas.width / 2, 120);
 
@@ -1637,17 +1638,17 @@ function drawChapterSelect() {
     
     // Chapter number
     ctx.fillStyle = '#8c44ff';
-    ctx.font = 'bold 36px Arial';
+    ctx.font = 'bold 36px Impact, monospace';
     ctx.fillText(`Chapter ${i + 1}`, canvas.width / 2, buttonY + 35);
     
     // Chapter name
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 24px Arial';
+    ctx.font = 'bold 24px monospace';
     ctx.fillText(chapter.name.replace(`Chapter ${i + 1}: `, ''), canvas.width / 2, buttonY + 65);
     
     // Chapter description
     ctx.fillStyle = '#aaaaaa';
-    ctx.font = '18px Arial';
+    ctx.font = '18px monospace';
     ctx.fillText(chapter.description, canvas.width / 2, buttonY + 85);
     
     window.chapterButtons.push({
@@ -1669,7 +1670,7 @@ function drawChapterSelect() {
   ctx.strokeRect(backX, backY, 120, 50);
   
   ctx.fillStyle = '#ffffff';
-  ctx.font = '24px Arial';
+  ctx.font = '24px monospace';
   ctx.textAlign = 'center';
   ctx.fillText('BACK', backX + 60, backY + 32);
   
@@ -1682,7 +1683,7 @@ function drawChapterSelect() {
 
   // Instructions
   ctx.fillStyle = '#666666';
-  ctx.font = '26px Arial';
+  ctx.font = '26px monospace';
   ctx.fillText('ESC - Back to Menu', canvas.width / 2, canvas.height - 30);
 
   ctx.textAlign = 'left';
@@ -1703,12 +1704,12 @@ function drawLevelSelect() {
 
   // Title
   ctx.fillStyle = '#9844ffff';
-  ctx.font = 'bold 48px Arial';
+  ctx.font = 'bold 48px monospace';
   ctx.textAlign = 'center';
   ctx.fillText(`Chapter ${currentChapter + 1}: ${chapterInfo.name.replace(`Chapter ${currentChapter + 1}: `, '')}`, canvas.width / 2, 100);
   
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 32px Arial';
+  ctx.font = 'bold 32px monospace';
   ctx.fillText('SELECT LEVEL', canvas.width / 2, 140);
 
   // Level buttons (scaled to 90x90)
@@ -1752,26 +1753,26 @@ function drawLevelSelect() {
     } else {
       ctx.fillStyle = '#555555'; // Very dark gray for locked
     }
-    ctx.font = '36px Arial';
+    ctx.font = '36px monospace';
     ctx.fillText(i+1, canvas.width / 2 - 255 + x * 120, y - 7);
 
     // Lock icon for locked levels
     if (!isUnlocked) {
       ctx.fillStyle = '#555555';
-      ctx.font = '32px Arial';
+      ctx.font = '32px monospace';
       ctx.fillText('🔒', canvas.width / 2 - 263 + x * 120, y + 23);
     } else if (isCompleted) {
       // Show star rating for completed levels
       const globalIndex = getGlobalLevelIndex(currentChapter, i);
       const stars = levelStars[globalIndex] || 0;
       ctx.fillStyle = '#ffdd44';
-      ctx.font = '24px Arial';
+      ctx.font = '24px monospace';
       const starText = '★'.repeat(stars) + '☆'.repeat(3 - stars);
-      ctx.fillText(starText, canvas.width / 2 - 268 + x * 120, y + 23);
+      ctx.fillText(starText, canvas.width / 2 - 255 + x * 120, y + 23);
     } else {
       // Button hint for unlocked but not completed levels
       ctx.fillStyle = '#888888';
-      ctx.font = '22px Arial';
+      ctx.font = '22px monospace';
       if (i < 9) {
         ctx.fillText(`Press ${i + 1}`, canvas.width / 2 - 255 + x * 120, y + 23);
       } else {
@@ -1792,14 +1793,14 @@ function drawLevelSelect() {
 
   // Bonus level button (if available and unlocked)
   if (chapterInfo.bonusLevel && isBonusLevelUnlocked(currentChapter)) {
-    let bonusX = canvas.width / 2 - 45; // Center position
+    let bonusX = canvas.width / 2 - 60; // Center position
     let bonusY = y + 80; // Below the regular levels
     
     const bonusGlobalIndex = getBonusLevelGlobalIndex(currentChapter);
     const isBonusCompleted = completedLevels.has(bonusGlobalIndex);
     
     // Draw bonus button - special gold color
-    ctx.fillStyle = isBonusCompleted ? '#FFD700' : '#B8860B'; // Gold or dark gold
+    ctx.fillStyle = isBonusCompleted ? '#9900ffff' : '#B8860B'; // Gold or dark gold
     ctx.fillRect(bonusX, bonusY, 90, 90);
     
     // Special border for bonus level
@@ -1809,7 +1810,7 @@ function drawLevelSelect() {
 
     // Bonus level text
     ctx.fillStyle = '#000000'; // Black text on gold background
-    ctx.font = '24px Arial';
+    ctx.font = 'bold 24px "Courier New", monospace';
     ctx.textAlign = 'center';
     ctx.fillText('BONUS', bonusX + 45, bonusY + 40);
     
@@ -1817,13 +1818,13 @@ function drawLevelSelect() {
       // Show star rating for completed bonus level
       const stars = levelStars[bonusGlobalIndex] || 0;
       ctx.fillStyle = '#ffdd44';
-      ctx.font = '20px Arial';
+      ctx.font = '20px monospace';
       const starText = '★'.repeat(stars) + '☆'.repeat(3 - stars);
-      ctx.fillText(starText, bonusX + 45, bonusY + 65);
+      ctx.fillText(starText, bonusX + 45, bonusY + 75);
     } else {
       // Button hint for bonus level
       ctx.fillStyle = '#000000';
-      ctx.font = '18px Arial';
+      ctx.font = '18px monospace';
       ctx.fillText('Press B', bonusX + 45, bonusY + 65);
     }
     
@@ -1848,7 +1849,7 @@ function drawLevelSelect() {
   ctx.strokeRect(backX, backY, 120, 50);
   
   ctx.fillStyle = '#ffffff';
-  ctx.font = '24px Arial';
+  ctx.font = '24px monospace';
   ctx.textAlign = 'center';
   ctx.fillText('BACK', backX + 60, backY + 32);
   
@@ -1861,7 +1862,7 @@ function drawLevelSelect() {
 
   // Instructions
   ctx.fillStyle = '#666666';
-  ctx.font = '26px Arial';
+  ctx.font = '26px monospace';
   ctx.fillText('ESC - Back to Chapters', canvas.width / 2, canvas.height - 30);
 
   ctx.textAlign = 'left';
@@ -1874,13 +1875,13 @@ function drawSettings() {
 
   // Title
   ctx.fillStyle = '#9844ffff';
-  ctx.font = 'bold 72px Arial';
+  ctx.font = 'bold 72px monospace';
   ctx.textAlign = 'center';
   ctx.fillText('SETTINGS', canvas.width / 2, 120);
 
   // Audio settings
   ctx.fillStyle = '#ffffff';
-  ctx.font = '36px Arial';
+  ctx.font = '36px monospace';
   ctx.fillText('AUDIO', canvas.width / 2, 200);
 
   // Volume controls
@@ -1890,7 +1891,7 @@ function drawSettings() {
   
   // Master Volume
   ctx.fillStyle = '#aaaaaa';
-  ctx.font = '24px Arial';
+  ctx.font = '24px monospace';
   ctx.fillText('Master Volume', centerX - 150, 260);
   
   // Master volume slider background
@@ -1903,12 +1904,12 @@ function drawSettings() {
   
   // Master volume value
   ctx.fillStyle = '#ffffff';
-  ctx.font = '20px Arial';
+  ctx.font = '20px monospace';
   ctx.fillText(`${Math.round(masterVolume * 100)}%`, centerX + sliderWidth/2 + 20, 287);
 
   // Music Volume
   ctx.fillStyle = '#aaaaaa';
-  ctx.font = '24px Arial';
+  ctx.font = '24px monospace';
   ctx.fillText('Music Volume', centerX - 150, 340);
   
   // Music volume slider background
@@ -1921,12 +1922,12 @@ function drawSettings() {
   
   // Music volume value
   ctx.fillStyle = '#ffffff';
-  ctx.font = '20px Arial';
+  ctx.font = '20px monospace';
   ctx.fillText(`${Math.round(musicVolume * 100)}%`, centerX + sliderWidth/2 + 20, 367);
 
   // SFX Volume
   ctx.fillStyle = '#aaaaaa';
-  ctx.font = '24px Arial';
+  ctx.font = '24px monospace';
   ctx.fillText('SFX Volume', centerX - 150, 420);
   
   // SFX volume slider background
@@ -1939,7 +1940,7 @@ function drawSettings() {
   
   // SFX volume value
   ctx.fillStyle = '#ffffff';
-  ctx.font = '20px Arial';
+  ctx.font = '20px monospace';
   ctx.fillText(`${Math.round(sfxVolume * 100)}%`, centerX + sliderWidth/2 + 20, 447);
 
   // Store slider positions for mouse interaction
@@ -1977,7 +1978,7 @@ function drawSettings() {
   ctx.strokeRect(backX, backY, 120, 50);
   
   ctx.fillStyle = '#ffffff';
-  ctx.font = '24px Arial';
+  ctx.font = '24px monospace';
   ctx.fillText('BACK', backX + 60, backY + 32);
   
   window.backButton = {
@@ -1989,7 +1990,7 @@ function drawSettings() {
 
   // Instructions
   ctx.fillStyle = '#666666';
-  ctx.font = '24px Arial';
+  ctx.font = '24px monospace';
   ctx.fillText('ESC - Back to Menu  |  Click and drag sliders to adjust volume', canvas.width / 2, canvas.height - 30);
 
   ctx.textAlign = 'left';
