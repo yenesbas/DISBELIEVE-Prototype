@@ -10,6 +10,7 @@ LEVEL MAP CHARACTERS:
   '.'  = Empty space (air)
   '#'  = Ground/Platform (solid block - player collides with it)
   'F'  = Fake block (looks like ground but player passes through it!)
+  'I'  = Invisible platform (solid collision but completely invisible!)
   'D'  = Door (level exit - player must reach this to complete)
   '1'  = Spike that moves 1 tile  (40px) when triggered
   '2'  = Spike that moves 2 tiles (80px) when triggered
@@ -64,6 +65,10 @@ TIPS FOR LEVEL DESIGN:
   5. Start simple - test your level to make sure it's possible!
   6. Use '1' spikes for small gaps, '3' or '4' for long jumps
   7. Use 'F' for fake blocks - they look solid but aren't! Great for deception!
+  8. Use 'I' for invisible platforms - they're solid but completely invisible!
+     Players must discover them through trial and experimentation!
+  9. Mix 'F' and 'I' for maximum confusion - fake visible vs real invisible!
+  10. DEBUG MODE: Set DEBUG_MODE = true to see invisible platforms as cyan!
 
 EXAMPLE LEVEL:
   const levels = [
@@ -74,8 +79,8 @@ EXAMPLE LEVEL:
         "..................D.",  // Door on top platform
         "........##........##",  // Platform with door
         "####..............##",  // Left starting platform
-        "...#..1...2....FF###",  // Spikes: 1 and 2
-        "...#####...#########"   // Row 5 (bottom)
+        "...#..1...2....FF###",  // Spikes: 1 and 2, fake blocks: FF
+        "...#####I..#########"   // Row 5 (bottom) with invisible platform: I
       ],
       spikeTriggers: [3, 1],  // OPTIONAL: First spike trigger at 3 tiles left, second at 1 tile left
       spikeTriggerLengths: [80, -120]  // OPTIONAL: 80 = 80px UP, -120 = 120px DOWN from spike top
@@ -219,6 +224,7 @@ function setupAudioControls() {
 // '.' = air/empty space
 // '#' = ground/platform (solid - player collides)
 // 'F' = fake block (looks solid but player passes through!)
+// 'I' = invisible platform (solid but completely invisible!)
 // 'D' = door (level exit)
 // '1' = spike that moves 1 tile when triggered
 // '2' = spike that moves 2 tiles when triggered
@@ -411,7 +417,28 @@ const chapters = [
         spikeTriggers: [-0.5, -4, -0.5, -1, -50, -50, -1, -50, -1, -50, -50, -50, -50, -1],           // Horizontal offsets
         spikeTriggerLengths: [250, 200, 1, 200, 1.05, 1.1, 150, 2, 150, 4, 5, 6, 7, 400, 9]  // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
       }
-    ]
+    ],
+    bonusLevel: {
+      name: "Bonus: Chapter 1 Ultimate Challenge",
+      description: "Master of deception - fake blocks everywhere!",
+      name: "Bonus Level: For experts only",
+      map: [
+        "....................",
+        ".....2..3...3.......",
+        "#.######F##########.",
+        ".#......F...#.....#.",
+        "..F##F..F...#.....#.",
+        "..#..#..#.....#.....",
+        "1.#11#12#.3...#2.2#.",
+        "F############.#####.",
+        "............#.......",
+        "............F.....D.",
+        "#.F..#..F..#########",
+        "..#..#..#..........."
+      ],
+      spikeTriggers: [-0.5, -4, 0, -1.5, -5.1, -3.2, -1, -3, -1, -3, -2.5],           // Horizontal offsets
+      spikeTriggerLengths: [250, 251, 252, 120, 1.05, 1.1, 151, 160, 150, 80, 180]
+    }
   },
   // Future chapters can be added here:
   {
@@ -419,25 +446,44 @@ const chapters = [
     description: "Master the art of disbelief",
     levels: [
       {
-        name: "Level 1: Chapter 2 Intro",
+        name: "Level 1: First Steps Into Nothing",
         map: [
           "....................",
-          ".....2..3...3.......",
-          "#.######F##########.",
-          ".#......F...#.....#.",
-          "..F##F..F...#.....#.",
-          "..#..#..#.....#.....",
-          "1.#11#12#.3...#2.2#.",
-          "F############.#####.",
-          "............#.......",
-          "............F.....D.",
-          "#.F..#..F..#########",
-          "..#..#..#..........."
-        ],
-        spikeTriggers: [-0.5, -4, 0, -1.5, -5.1, -3.2, -1, -3, -1, -3, -2.5],           // Horizontal offsets
-        spikeTriggerLengths: [250, 251, 252, 120, 1.05, 1.1, 151, 160, 150, 80, 180]  // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
+          "....................",
+          "....................",
+          "....................",
+          "..................D.",
+          ".................##.",
+          "..............I.....",
+          "...........I........",
+          "........I...........",
+          "###.................",
+          "....................",
+          "####################"
+        ]
+        // Simple introduction - clear staircase pattern with invisible platforms
       }
-    ]
+    ],
+    bonusLevel: {
+      name: "Bonus: Chapter 2 Ultimate Challenge",
+      description: "Master of invisible platforms - trust nothing you can't see!",
+      map: [
+        "....................",
+        "....................",
+        "IIIIIII.......IIIIID",
+        "#######.......######",
+        ".......IIIIIII......",
+        ".......#######......",
+        "###....2....3....###",
+        "...IIII.IIII.IIII...",
+        "...####.####.####...",
+        "....................",
+        "....................",
+        "####################"
+      ],
+      spikeTriggers: [-2, -3],
+      spikeTriggerLengths: [200, 250]
+    }
   }
 ];
 
@@ -445,6 +491,10 @@ const chapters = [
 const levels = [];
 chapters.forEach(chapter => {
   levels.push(...chapter.levels);
+  // Add bonus level at the end of each chapter if it exists
+  if (chapter.bonusLevel) {
+    levels.push(chapter.bonusLevel);
+  }
 });
 
 // Helper functions for chapter/level management
@@ -484,6 +534,7 @@ let currentLevelInChapter = 0; // 0-based index within the current chapter
 let player = null;
 let platforms = [];
 let fakeBlocks = []; // Blocks that look solid but player passes through
+let invisiblePlatforms = []; // Platforms that are solid but completely invisible
 let spikes = [];
 let door = null;
 let deaths = 0;
@@ -555,6 +606,24 @@ function isLevelUnlocked(chapterIndex, levelInChapter) {
   const previousGlobalIndex = globalIndex - 1;
   
   return completedLevels.has(previousGlobalIndex);
+}
+
+function isBonusLevelUnlocked(chapterIndex) {
+  // Bonus level unlocks when level 10 of the chapter is completed
+  const level10GlobalIndex = getGlobalLevelIndex(chapterIndex, 9); // Level 10 = index 9
+  return completedLevels.has(level10GlobalIndex);
+}
+
+function getBonusLevelGlobalIndex(chapterIndex) {
+  // Calculate global index for bonus level
+  // Bonus levels are placed after regular levels: chapter levels + previous bonus levels
+  let globalIndex = 0;
+  for (let i = 0; i < chapterIndex; i++) {
+    globalIndex += chapters[i].levels.length;
+    if (chapters[i].bonusLevel) globalIndex += 1; // Add bonus level if exists
+  }
+  globalIndex += chapters[chapterIndex].levels.length; // Add regular levels for current chapter
+  return globalIndex;
 }
 
 function markLevelComplete(globalIndex) {
@@ -682,6 +751,7 @@ function loadLevel(globalLevelIndex) {
 function parseLevel() {
   platforms = [];
   fakeBlocks = [];
+  invisiblePlatforms = [];
   spikes = [];
   door = null;
 
@@ -703,6 +773,9 @@ function parseLevel() {
       } else if (char === 'F') {
         // Fake block - looks like platform but has no collision
         fakeBlocks.push({ x, y, width: TILE_SIZE, height: TILE_SIZE });
+      } else if (char === 'I') {
+        // Invisible platform - has collision but is completely invisible
+        invisiblePlatforms.push({ x, y, width: TILE_SIZE, height: TILE_SIZE });
       } else if (char === '1' || char === '2' || char === '3' || char === '4' || char === '^') {
         // Determine spike movement distance
         let moveDistance;
@@ -942,6 +1015,19 @@ function update(deltaTime) {
     }
   });
 
+  // Invisible platform horizontal collision check
+  invisiblePlatforms.forEach(platform => {
+    if (checkCollision(player, platform)) {
+      if (player.vx > 0) {
+        // Moving right, push back to left side of platform
+        player.x = platform.x - player.width;
+      } else if (player.vx < 0) {
+        // Moving left, push back to right side of platform
+        player.x = platform.x + platform.width;
+      }
+    }
+  });
+
   // Update vertical position (scaled by deltaTime)
   player.y += player.vy * deltaTime;
 
@@ -949,6 +1035,23 @@ function update(deltaTime) {
   player.onGround = false;
 
   platforms.forEach(platform => {
+    if (checkCollision(player, platform)) {
+      // Check if player is falling onto platform (landing on top)
+      if (player.vy > 0) {
+        player.y = platform.y - player.height;
+        player.vy = 0;
+        player.onGround = true;
+      }
+      // Check if player hit platform from below (hitting ceiling)
+      else if (player.vy < 0) {
+        player.y = platform.y + platform.height;
+        player.vy = 0;
+      }
+    }
+  });
+
+  // Invisible platform vertical collision check
+  invisiblePlatforms.forEach(platform => {
     if (checkCollision(player, platform)) {
       // Check if player is falling onto platform (landing on top)
       if (player.vy > 0) {
@@ -1140,6 +1243,26 @@ function render() {
     ctx.strokeStyle = '#555';
     ctx.strokeRect(platform.x, platform.y, platform.width, platform.height);
   });
+
+  // Draw invisible platforms (only visible in debug mode)
+  if (ENABLE_DEBUG_FEATURES && DEBUG_MODE) {
+    ctx.fillStyle = 'rgba(0, 255, 255, 0.3)'; // Cyan with transparency
+    invisiblePlatforms.forEach(platform => {
+      ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+      
+      // Add cyan outline
+      ctx.strokeStyle = 'cyan';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(platform.x, platform.y, platform.width, platform.height);
+      
+      // Add text label
+      ctx.fillStyle = 'cyan';
+      ctx.font = '14px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('I', platform.x + platform.width/2, platform.y + platform.height/2 + 5);
+    });
+    ctx.lineWidth = 1; // Reset line width
+  }
 
   // Draw fake blocks (visually identical to solid platforms so player cannot tell)
   fakeBlocks.forEach(fakeBlock => {
@@ -1667,6 +1790,54 @@ function drawLevelSelect() {
     x++;
   }
 
+  // Bonus level button (if available and unlocked)
+  if (chapterInfo.bonusLevel && isBonusLevelUnlocked(currentChapter)) {
+    let bonusX = canvas.width / 2 - 45; // Center position
+    let bonusY = y + 80; // Below the regular levels
+    
+    const bonusGlobalIndex = getBonusLevelGlobalIndex(currentChapter);
+    const isBonusCompleted = completedLevels.has(bonusGlobalIndex);
+    
+    // Draw bonus button - special gold color
+    ctx.fillStyle = isBonusCompleted ? '#FFD700' : '#B8860B'; // Gold or dark gold
+    ctx.fillRect(bonusX, bonusY, 90, 90);
+    
+    // Special border for bonus level
+    ctx.strokeStyle = isBonusCompleted ? '#44ff44' : '#FFA500'; // Green if completed, orange if not
+    ctx.lineWidth = 4;
+    ctx.strokeRect(bonusX, bonusY, 90, 90);
+
+    // Bonus level text
+    ctx.fillStyle = '#000000'; // Black text on gold background
+    ctx.font = '24px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('BONUS', bonusX + 45, bonusY + 40);
+    
+    if (isBonusCompleted) {
+      // Show star rating for completed bonus level
+      const stars = levelStars[bonusGlobalIndex] || 0;
+      ctx.fillStyle = '#ffdd44';
+      ctx.font = '20px Arial';
+      const starText = '★'.repeat(stars) + '☆'.repeat(3 - stars);
+      ctx.fillText(starText, bonusX + 45, bonusY + 65);
+    } else {
+      // Button hint for bonus level
+      ctx.fillStyle = '#000000';
+      ctx.font = '18px Arial';
+      ctx.fillText('Press B', bonusX + 45, bonusY + 65);
+    }
+    
+    window.levelButtons.push({
+      x: bonusX,
+      y: bonusY,
+      width: 90,
+      height: 90,
+      levelInChapter: -1, // Special marker for bonus level
+      isUnlocked: true,
+      isBonus: true
+    });
+  }
+
   // Back button
   let backX = 50;
   let backY = canvas.height - 100;
@@ -1928,6 +2099,14 @@ document.addEventListener('keydown', (e) => {
         loadLevelFromChapter(currentChapter, 9);
         updateStats();
       }
+    } else if (e.code === 'KeyB') {
+      // Bonus level
+      const chapterInfo = getCurrentChapterInfo();
+      if (chapterInfo && chapterInfo.bonusLevel && isBonusLevelUnlocked(currentChapter)) {
+        const bonusGlobalIndex = getBonusLevelGlobalIndex(currentChapter);
+        loadLevel(bonusGlobalIndex);
+        updateStats();
+      }
     } else if (e.code === 'Escape') {
       transitionToState('chapterSelect');
     }
@@ -2058,8 +2237,16 @@ canvas.addEventListener('mousedown', function(e) {
                 if (mx >= btn.x && mx <= btn.x + btn.width && my >= btn.y && my <= btn.y + btn.height) {
                     // Only allow clicking unlocked levels
                     if (btn.isUnlocked) {
-                        loadLevelFromChapter(currentChapter, btn.levelInChapter);
-                        updateStats();
+                        if (btn.isBonus) {
+                            // Load bonus level
+                            const bonusGlobalIndex = getBonusLevelGlobalIndex(currentChapter);
+                            loadLevel(bonusGlobalIndex);
+                            updateStats();
+                        } else {
+                            // Load regular level
+                            loadLevelFromChapter(currentChapter, btn.levelInChapter);
+                            updateStats();
+                        }
                     }
                     break;
                 }
