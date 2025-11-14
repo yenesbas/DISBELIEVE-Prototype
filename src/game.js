@@ -1,108 +1,9 @@
 // Disbelieve Prototype - game.js
 // All game logic in one file
 
-/*
-═══════════════════════════════════════════════════════════════════════
-  HOW TO BUILD YOUR OWN LEVELS - COMPLETE GUIDE
-═══════════════════════════════════════════════════════════════════════
-
-LEVEL MAP CHARACTERS:
-  '.'  = Empty space (air)
-  '#'  = Ground/Platform (solid block - player collides with it)
-  'F'  = Fake block (looks like ground but player passes through it!)
-  'I'  = Invisible platform (solid collision but completely invisible!)
-  'S'  = Spawn Point (player starting position)
-  'D'  = Door (level exit - player must reach this to complete)
-  '1'  = Spike that moves 1 tile  (40px) when triggered
-  '2'  = Spike that moves 2 tiles (80px) when triggered
-  '3'  = Spike that moves 3 tiles (120px) when triggered
-  '4'  = Spike that moves 4 tiles (160px) when triggered
-  '^'  = Spike that moves 2 tiles (same as '2', for backward compatibility)
-
-SPIKE BEHAVIOR:
-  - Spikes are triggered when the player crosses an INVISIBLE VERTICAL LINE
-  - Each spike has a trigger line positioned to its LEFT
-  - Once triggered, they rapidly move to the right by their specified distance
-  - '1' = short movement (easier to avoid, good for beginners)
-  - '4' = long movement (very dangerous, creates big traps)
-  - Mix different spike types to create varied difficulty!
-
-TRIGGER LINE POSITIONS:
-  - By DEFAULT, trigger line is 2 tiles (80px) to the LEFT of each spike
-  - You can customize trigger positions in the level's "spikeTriggers" array
-  - Format: spikeTriggers: [tileOffset1, tileOffset2, ...]
-  - Example: spikeTriggers: [3, 1, 4] means:
-      * First spike: trigger 3 tiles to the left
-      * Second spike: trigger 1 tile to the left
-      * Third spike: trigger 4 tiles to the left
-
-TRIGGER LINE LENGTHS (VERTICAL):
-  - By DEFAULT, trigger lines extend the FULL HEIGHT of the screen
-  - You can limit trigger length using the "spikeTriggerLengths" array
-  - Format: spikeTriggerLengths: [length1, length2, ...]
-  - Length is in pixels (use TILE_SIZE multiples: 40, 80, 120, etc.)
-  - POSITIVE values extend UPWARD from the spike top
-  - NEGATIVE values extend DOWNWARD from the spike top
-  - Example: spikeTriggerLengths: [80, -120, 40] means:
-      * First spike: trigger line goes 80px UP from spike top
-      * Second spike: trigger line goes 120px DOWN from spike top
-      * Third spike: trigger line goes 40px UP from spike top
-  - If omitted or null, that spike uses full-height trigger
-
-DEBUG MODE:
-  - Set DEBUG_MODE = true (line 170) to see yellow trigger lines in-game
-  - Press 'T' during gameplay to toggle debug mode on/off
-  - Trigger info is ALWAYS displayed below the canvas (shows offset for each spike)
-  - Format: [Spike#: -X tiles STATUS] where:
-      * ○ = not triggered yet
-      * → = currently moving
-      * ✓ = finished moving
-
-TIPS FOR LEVEL DESIGN:
-  1. Each row must be exactly 20 characters (one tile = one character)
-  2. Use 6 rows for standard level height (480px canvas)
-  3. Make sure spikes have room to move right (check for empty space)
-  4. Place the door 'D' at the end of your level as the goal
-  5. Start simple - test your level to make sure it's possible!
-  6. Use '1' spikes for small gaps, '3' or '4' for long jumps
-  7. Use 'F' for fake blocks - they look solid but aren't! Great for deception!
-  8. Use 'I' for invisible platforms - they're solid but completely invisible!
-     Players must discover them through trial and experimentation!
-  9. Mix 'F' and 'I' for maximum confusion - fake visible vs real invisible!
-  10. DEBUG MODE: Set DEBUG_MODE = true to see invisible platforms as cyan!
-
-EXAMPLE LEVEL:
-  const levels = [
-    {
-      name: "My Custom Level",
-      map: [
-        "....................",  // Row 0 (top)
-        "..................D.",  // Door on top platform
-        "........##........##",  // Platform with door
-        "####..............##",  // Left starting platform
-        "...#..1...2....FF###",  // Spikes: 1 and 2, fake blocks: FF
-        "...#####I..#########"   // Row 5 (bottom) with invisible platform: I
-      ],
-      spikeTriggers: [3, 1],  // OPTIONAL: First spike trigger at 3 tiles left, second at 1 tile left
-      spikeTriggerLengths: [80, -120]  // OPTIONAL: 80 = 80px UP, -120 = 120px DOWN from spike top
-                              // If omitted or null, spike uses full-height trigger
-    }
-  ];
-
-TO ADD A NEW LEVEL:
-  Scroll down to the 'levels' array and add your level like this:
-
-  {
-    name: "Level 4: Your Name Here",
-    map: [
-      "your level design...",
-      "...goes here........",
-      // ... 6 rows total
-    ]
-  }
-
-═══════════════════════════════════════════════════════════════════════
-*/
+// Removed detailed level-building guide and debug tips to separate files:
+// - See 'level_guide.md' for how to build levels
+// - See 'debug_and_design_tips.md' for debug mode and design tips
 
 // Canvas setup
 const canvas = document.getElementById('gameCanvas');
@@ -341,7 +242,7 @@ const chapters = [
           "....................",
           ".S................D.",
           "F##FF#FFF####FFF####",
-          "11111111111111111111"
+          "00111111111111111111"
         ],
         spikeTriggers: [],  // Spike 1: 1 tile, Spike 2: 3 tiles, Spike 3: 2 tiles left
         spikeTriggerLengths: [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]  // All spikes have very short triggers (1px height) to force immediate activation
@@ -820,14 +721,14 @@ function parseLevel() {
       } else if (char === 'I') {
         // Invisible platform - has collision but is completely invisible
         invisiblePlatforms.push({ x, y, width: TILE_SIZE, height: TILE_SIZE });
-      } else if (char === '1' || char === '2' || char === '3' || char === '4' || char === '^') {
-        // Determine spike movement distance
+      } else if (/^[0-9]$/.test(char) || char === '^') {
+        // Handle spikes with movement distances 0-9 or backward compatibility '^'
         let moveDistance;
-        if (char === '1') moveDistance = TILE_SIZE * 1;
-        else if (char === '2') moveDistance = TILE_SIZE * 2;
-        else if (char === '3') moveDistance = TILE_SIZE * 3;
-        else if (char === '4') moveDistance = TILE_SIZE * 4;
-        else if (char === '^') moveDistance = TILE_SIZE * 2; // backward compatibility
+        if (char === '^') {
+          moveDistance = TILE_SIZE * 2; // backward compatibility
+        } else {
+          moveDistance = TILE_SIZE * parseInt(char, 10);
+        }
 
         // Determine trigger position (vertical line to the left of spike)
         const triggerOffset = customTriggers[spikeIndex] !== undefined
@@ -850,7 +751,7 @@ function parseLevel() {
         } else {
           // Limited-height trigger from spike top
           const spikeTopY = y + 20; // Spike's actual visual y position (top)
-          
+
           if (triggerLength > 0) {
             // POSITIVE: extends UPWARD from spike top
             triggerY = spikeTopY - triggerLength;
@@ -1926,7 +1827,7 @@ function drawSettings() {
 
   // Title
   ctx.fillStyle = '#9844ffff';
-  ctx.font = 'bold 72px monospace';
+  ctx.font = 'bold 72px Impact, monospace';
   ctx.textAlign = 'center';
   ctx.fillText('SETTINGS', canvas.width / 2, 120);
 
@@ -2049,365 +1950,236 @@ function drawSettings() {
 
 // Game loop
 function gameLoop(currentTime = 0) {
-    if (isPaused) {
-        requestAnimationFrame(gameLoop);
-        return;
-    }
-
-    // Calculate delta time with safety caps
-    let deltaTime = currentTime - lastTime;
-    if (deltaTime > 100) deltaTime = 16.67; // Cap at ~60fps if tab was inactive
-    
-    lastTime = currentTime;
-
-    // Convert to seconds and update
-    deltaTime = Math.min(deltaTime / 1000, 0.1); // Cap at 100ms
-    update(deltaTime);
-    render();
-
+  if (isPaused) {
     requestAnimationFrame(gameLoop);
+    return;
+  }
+
+  // Calculate delta time
+  const deltaTime = (currentTime - lastTime) / 1000;
+  lastTime = currentTime;
+
+  // Update and render
+  update(deltaTime);
+  render();
+
+  requestAnimationFrame(gameLoop);
+}
+
+// Handle mouse clicks on buttons
+function handleClick(event) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const x = (event.clientX - rect.left) * scaleX;
+  const y = (event.clientY - rect.top) * scaleY;
+
+  // Check menu buttons
+  if (gameState === 'menu' && window.menuButtons) {
+    window.menuButtons.forEach(button => {
+      if (x >= button.x && x <= button.x + button.width &&
+          y >= button.y && y <= button.y + button.height) {
+        if (button.action === 'startGame') {
+          transitionToState('chapterSelect');
+        } else if (button.action === 'settings') {
+          previousGameState = gameState;
+          transitionToState('settings');
+        }
+      }
+    });
+  }
+
+  // Check settings buttons
+  if (gameState === 'settings' && window.backButton) {
+    const button = window.backButton;
+    if (x >= button.x && x <= button.x + button.width &&
+        y >= button.y && y <= button.y + button.height) {
+      transitionToState(previousGameState || 'menu');
+    }
+  }
+
+  // Check chapter selection buttons
+  if (gameState === 'chapterSelect' && window.chapterButtons) {
+    window.chapterButtons.forEach(button => {
+      if (x >= button.x && x <= button.x + button.width &&
+          y >= button.y && y <= button.y + button.height) {
+        currentChapter = button.chapter;
+        transitionToState('levelSelect');
+      }
+    });
+    
+    // Check back button
+    if (window.backButton) {
+      const backBtn = window.backButton;
+      if (x >= backBtn.x && x <= backBtn.x + backBtn.width &&
+          y >= backBtn.y && y <= backBtn.y + backBtn.height) {
+        transitionToState('menu');
+      }
+    }
+  }
+
+  // Check level selection buttons
+  if (gameState === 'levelSelect' && window.levelButtons) {
+    window.levelButtons.forEach(button => {
+      if (x >= button.x && x <= button.x + button.width &&
+          y >= button.y && y <= button.y + button.height) {
+        if (button.isUnlocked) {
+          if (button.isBonus) {
+            // Load bonus level
+            const bonusGlobalIndex = getBonusLevelGlobalIndex(currentChapter);
+            loadLevel(bonusGlobalIndex);
+            transitionToState('playing');
+          } else {
+            // Load regular level
+            loadLevelFromChapter(currentChapter, button.levelInChapter);
+            transitionToState('playing');
+          }
+        }
+      }
+    });
+    
+    // Check back button
+    if (window.backButton) {
+      const backBtn = window.backButton;
+      if (x >= backBtn.x && x <= backBtn.x + backBtn.width &&
+          y >= backBtn.y && y <= backBtn.y + backBtn.height) {
+        transitionToState('chapterSelect');
+      }
+    }
+  }
+
+  // Check pause menu buttons
+  if (gameState === 'paused' && window.pauseButtons) {
+    window.pauseButtons.forEach(button => {
+      if (x >= button.x && x <= button.x + button.width &&
+          y >= button.y && y <= button.y + button.height) {
+        if (button.action === 'resume') {
+          gameState = 'playing';
+        } else if (button.action === 'restart') {
+          loadLevel(currentLevel);
+          gameState = 'playing';
+        } else if (button.action === 'settings') {
+          previousGameState = 'playing'; // Return to playing after settings
+          transitionToState('settings');
+        } else if (button.action === 'quit') {
+          transitionToState('menu');
+        }
+      }
+    });
+  }
 }
 
 // Keyboard event listeners
-document.addEventListener('keydown', (e) => {
-  // Menu controls
-  if (gameState === 'menu') {
-    // No specific keyboard controls for main menu
-    return;
+window.addEventListener('keydown', (e) => {
+  // Movement keys
+  if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+    keys.left = true;
+  }
+  if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+    keys.right = true;
+  }
+  if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') {
+    keys.space = true;
+    e.preventDefault(); // Prevent page scrolling
+  }
+  if (e.code === 'KeyR') {
+    keys.r = true;
   }
 
-  // Chapter selection controls
+  // Debug mode toggle
+  if (ENABLE_DEBUG_FEATURES && e.code === 'KeyT') {
+    DEBUG_MODE = !DEBUG_MODE;
+  }
+
+  // Number keys for quick chapter selection (only in chapterSelect state)
   if (gameState === 'chapterSelect') {
-    if (e.code === 'Digit1' || e.code === 'Numpad1') {
-      if (chapters.length >= 1) {
-        currentChapter = 0;
-        transitionToState('levelSelect');
-      }
-    } else if (e.code === 'Digit2' || e.code === 'Numpad2') {
-      if (chapters.length >= 2) {
-        currentChapter = 1;
-        transitionToState('levelSelect');
-      }
-    } else if (e.code === 'Digit3' || e.code === 'Numpad3') {
-      if (chapters.length >= 3) {
-        currentChapter = 2;
-        transitionToState('levelSelect');
-      }
-    } else if (e.code === 'Escape') {
-      transitionToState('menu');
+    let chapterIndex = -1;
+    
+    if (e.code === 'Digit1' || e.code === 'Numpad1') chapterIndex = 0;
+    else if (e.code === 'Digit2' || e.code === 'Numpad2') chapterIndex = 1;
+    else if (e.code === 'Digit3' || e.code === 'Numpad3') chapterIndex = 2;
+    else if (e.code === 'Digit4' || e.code === 'Numpad4') chapterIndex = 3;
+    else if (e.code === 'Digit5' || e.code === 'Numpad5') chapterIndex = 4;
+    else if (e.code === 'Digit6' || e.code === 'Numpad6') chapterIndex = 5;
+    else if (e.code === 'Digit7' || e.code === 'Numpad7') chapterIndex = 6;
+    else if (e.code === 'Digit8' || e.code === 'Numpad8') chapterIndex = 7;
+    else if (e.code === 'Digit9' || e.code === 'Numpad9') chapterIndex = 8;
+    
+    // Select chapter if valid
+    if (chapterIndex >= 0 && chapterIndex < chapters.length) {
+      currentChapter = chapterIndex;
+      transitionToState('levelSelect');
     }
-    return;
   }
 
-  // Level selection controls
+  // Number keys for quick level selection (only in levelSelect state)
   if (gameState === 'levelSelect') {
-    if (e.code === 'Digit1' || e.code === 'Numpad1') {
-      if (isLevelUnlocked(currentChapter, 0)) {
-        loadLevelFromChapter(currentChapter, 0);
-        updateStats();
-      }
-    } else if (e.code === 'Digit2' || e.code === 'Numpad2') {
-      if (isLevelUnlocked(currentChapter, 1)) {
-        loadLevelFromChapter(currentChapter, 1);
-        updateStats();
-      }
-    } else if (e.code === 'Digit3' || e.code === 'Numpad3') {
-      if (isLevelUnlocked(currentChapter, 2)) {
-        loadLevelFromChapter(currentChapter, 2);
-        updateStats();
-      }
-    } else if (e.code === 'Digit4' || e.code === 'Numpad4') {
-      if (isLevelUnlocked(currentChapter, 3)) {
-        loadLevelFromChapter(currentChapter, 3);
-        updateStats();
-      }
-    } else if (e.code === 'Digit5' || e.code === 'Numpad5') {
-      if (isLevelUnlocked(currentChapter, 4)) {
-        loadLevelFromChapter(currentChapter, 4);
-        updateStats();
-      }
-    } else if (e.code === 'Digit6' || e.code === 'Numpad6') {
-      if (isLevelUnlocked(currentChapter, 5)) {
-        loadLevelFromChapter(currentChapter, 5);
-        updateStats();
-      }
-    } else if (e.code === 'Digit7' || e.code === 'Numpad7') {
-      if (isLevelUnlocked(currentChapter, 6)) {
-        loadLevelFromChapter(currentChapter, 6);
-        updateStats();
-      }
-    } else if (e.code === 'Digit8' || e.code === 'Numpad8') {
-      if (isLevelUnlocked(currentChapter, 7)) {
-        loadLevelFromChapter(currentChapter, 7);
-        updateStats();
-      }
-    } else if (e.code === 'Digit9' || e.code === 'Numpad9') {
-      if (isLevelUnlocked(currentChapter, 8)) {
-        loadLevelFromChapter(currentChapter, 8);
-        updateStats();
-      }
-    } else if (e.code === 'Digit0' || e.code === 'Numpad0') {
-      if (isLevelUnlocked(currentChapter, 9)) {
-        loadLevelFromChapter(currentChapter, 9);
-        updateStats();
-      }
-    } else if (e.code === 'KeyB') {
+    let levelIndex = -1;
+    
+    // Check for number keys 1-9
+    if (e.code === 'Digit1' || e.code === 'Numpad1') levelIndex = 0;
+    else if (e.code === 'Digit2' || e.code === 'Numpad2') levelIndex = 1;
+    else if (e.code === 'Digit3' || e.code === 'Numpad3') levelIndex = 2;
+    else if (e.code === 'Digit4' || e.code === 'Numpad4') levelIndex = 3;
+    else if (e.code === 'Digit5' || e.code === 'Numpad5') levelIndex = 4;
+    else if (e.code === 'Digit6' || e.code === 'Numpad6') levelIndex = 5;
+    else if (e.code === 'Digit7' || e.code === 'Numpad7') levelIndex = 6;
+    else if (e.code === 'Digit8' || e.code === 'Numpad8') levelIndex = 7;
+    else if (e.code === 'Digit9' || e.code === 'Numpad9') levelIndex = 8;
+    else if (e.code === 'Digit0' || e.code === 'Numpad0') levelIndex = 9;
+    else if (e.code === 'KeyB') {
       // Bonus level
       const chapterInfo = getCurrentChapterInfo();
       if (chapterInfo && chapterInfo.bonusLevel && isBonusLevelUnlocked(currentChapter)) {
         const bonusGlobalIndex = getBonusLevelGlobalIndex(currentChapter);
         loadLevel(bonusGlobalIndex);
-        updateStats();
+        transitionToState('playing');
       }
-    } else if (e.code === 'Escape') {
-      transitionToState('chapterSelect');
+      return; // Exit early for bonus level
     }
-    return;
-  }
-
-  // Settings controls
-  if (gameState === 'settings') {
-    if (e.code === 'Escape') {
-      // Return to previous state (could be menu or paused)
-      transitionToState(previousGameState || 'menu');
-      previousGameState = null;
+    
+    // Load the selected level if it's unlocked
+    if (levelIndex >= 0 && levelIndex < 10) {
+      if (isLevelUnlocked(currentChapter, levelIndex)) {
+        loadLevelFromChapter(currentChapter, levelIndex);
+        transitionToState('playing');
+      }
     }
-    return;
   }
 
-  // Pause menu controls
-  if (gameState === 'paused') {
-    if (e.code === 'Escape') {
-      gameState = 'playing';
-      resumeGame();
-    }
-    return;
-  }
-
-  // Game controls
-  if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = true;
-  if (e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = true;
-  if (e.code === 'Space' || e.code === 'KeyW' || e.code === 'ArrowUp') {
-    // Prevent page scrolling when using Space or W for jump
-    e.preventDefault();
-    keys.space = true;
-  }
-  if (e.code === 'KeyR') keys.r = true;
-
-  // ESC to pause/unpause game
+  // ESC key handling for different states
   if (e.code === 'Escape') {
     if (gameState === 'playing') {
-      // Pause the game
       gameState = 'paused';
-      // Stop player movement
-      keys.left = false;
-      keys.right = false;
-      keys.space = false;
-      keys.r = false;
-      if (player) {
-        player.vx = 0;
-      }
     } else if (gameState === 'paused') {
-      // Resume the game
       gameState = 'playing';
-      lastTime = performance.now();
     } else if (gameState === 'settings') {
-      // Return from settings
-      gameState = previousGameState || 'menu';
-      previousGameState = null;
+      transitionToState(previousGameState || 'menu');
+    } else if (gameState === 'chapterSelect') {
+      transitionToState('menu');
+    } else if (gameState === 'levelSelect') {
+      transitionToState('chapterSelect');
     }
   }
+});
 
-  // Toggle DEBUG_MODE with 'T' key (only if debug features are enabled)
-  if (ENABLE_DEBUG_FEATURES && e.code === 'KeyT') {
-    DEBUG_MODE = !DEBUG_MODE;
-    console.log(`DEBUG_MODE: ${DEBUG_MODE ? 'ON (trigger lines visible)' : 'OFF (trigger lines hidden)'}`);
+window.addEventListener('keyup', (e) => {
+  if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+    keys.left = false;
+  }
+  if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+    keys.right = false;
+  }
+  if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') {
+    keys.space = false;
+  }
+  if (e.code === 'KeyR') {
+    keys.r = false;
   }
 });
 
-document.addEventListener('keyup', (e) => {
-  if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = false;
-  if (e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = false;
-  if (e.code === 'Space' || e.code === 'KeyW' || e.code === 'ArrowUp') keys.space = false;
-  if (e.code === 'KeyR') keys.r = false;
-});
+// Mouse click handler for menu buttons
+canvas.addEventListener('click', handleClick);
 
-// Handle mouse interactions
-let isDragging = false;
-let dragSlider = null;
-
-canvas.addEventListener('mousedown', function(e) {
-    const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    
-    // Main menu interactions
-    if (gameState === 'menu') {
-        if (window.menuButtons) {
-            for (let btn of window.menuButtons) {
-                if (mx >= btn.x && mx <= btn.x + btn.width && my >= btn.y && my <= btn.y + btn.height) {
-                    if (btn.action === 'startGame') {
-                        transitionToState('chapterSelect');
-                    } else if (btn.action === 'settings') {
-                        previousGameState = 'menu'; // Remember we came from main menu
-                        transitionToState('settings');
-                    }
-                    break;
-                }
-            }
-        }
-        return;
-    }
-
-    // Chapter selection interactions
-    if (gameState === 'chapterSelect') {
-        // Check chapter buttons
-        if (window.chapterButtons) {
-            for (let btn of window.chapterButtons) {
-                if (mx >= btn.x && mx <= btn.x + btn.width && my >= btn.y && my <= btn.y + btn.height) {
-                    currentChapter = btn.chapter;
-                    transitionToState('levelSelect');
-                    break;
-                }
-            }
-        }
-        
-        // Check back button
-        if (window.backButton && 
-            mx >= window.backButton.x && mx <= window.backButton.x + window.backButton.width &&
-            my >= window.backButton.y && my <= window.backButton.y + window.backButton.height) {
-            transitionToState('menu');
-        }
-        return;
-    }
-
-    // Level selection interactions
-    if (gameState === 'levelSelect') {
-        // Check level buttons
-        if (window.levelButtons) {
-            for (let btn of window.levelButtons) {
-                if (mx >= btn.x && mx <= btn.x + btn.width && my >= btn.y && my <= btn.y + btn.height) {
-                    // Only allow clicking unlocked levels
-                    if (btn.isUnlocked) {
-                        if (btn.isBonus) {
-                            // Load bonus level
-                            const bonusGlobalIndex = getBonusLevelGlobalIndex(currentChapter);
-                            loadLevel(bonusGlobalIndex);
-                            updateStats();
-                        } else {
-                            // Load regular level
-                            loadLevelFromChapter(currentChapter, btn.levelInChapter);
-                            updateStats();
-                        }
-                    }
-                    break;
-                }
-            }
-        }
-        
-        // Check back button
-        if (window.backButton && 
-            mx >= window.backButton.x && mx <= window.backButton.x + window.backButton.width &&
-            my >= window.backButton.y && my <= window.backButton.y + window.backButton.height) {
-            transitionToState('chapterSelect');
-        }
-        return;
-    }
-
-    // Pause menu interactions
-    if (gameState === 'paused') {
-        if (window.pauseButtons) {
-            for (let btn of window.pauseButtons) {
-                if (mx >= btn.x && mx <= btn.x + btn.width && my >= btn.y && my <= btn.y + btn.height) {
-                    if (btn.action === 'resume') {
-                        gameState = 'playing';
-                        resumeGame();
-                    } else if (btn.action === 'restart') {
-                        resetPlayer();
-                        levelDeaths = 0;
-                        gameState = 'playing';
-                        resumeGame();
-                        updateStats();
-                    } else if (btn.action === 'settings') {
-                        previousGameState = 'paused'; // Remember we came from pause menu
-                        transitionToState('settings');
-                    } else if (btn.action === 'quit') {
-                        transitionToState('chapterSelect');
-                        currentLevel = 0;
-                        currentLevelInChapter = 0;
-                        deaths = 0;
-                        levelDeaths = 0;
-                        updateStats();
-                    }
-                    break;
-                }
-            }
-        }
-        return;
-    }
-
-    // Settings interactions
-    if (gameState === 'settings') {
-        // Check back button first
-        if (window.backButton && 
-            mx >= window.backButton.x && mx <= window.backButton.x + window.backButton.width &&
-            my >= window.backButton.y && my <= window.backButton.y + window.backButton.height) {
-            // Return to previous state (could be menu or paused)
-            transitionToState(previousGameState || 'menu');
-            previousGameState = null;
-            return;
-        }
-        
-        // Check volume sliders
-        if (window.volumeSliders) {
-            for (let slider of window.volumeSliders) {
-                if (mx >= slider.x && mx <= slider.x + slider.width &&
-                    my >= slider.y && my <= slider.y + slider.height) {
-                    // Start dragging
-                    isDragging = true;
-                    dragSlider = slider;
-                    
-                    // Also set initial value
-                    const clickPos = (mx - slider.x) / slider.width;
-                    const newVolume = Math.max(0, Math.min(1, clickPos));
-                    
-                    if (slider.type === 'master') {
-                        setMasterVolume(newVolume);
-                    } else if (slider.type === 'music') {
-                        setMusicVolume(newVolume);
-                    } else if (slider.type === 'sfx') {
-                        setSfxVolume(newVolume);
-                    }
-                    break;
-                }
-            }
-        }
-        return;
-    }
-});
-
-canvas.addEventListener('mousemove', function(e) {
-    if (!isDragging || !dragSlider || gameState !== 'settings') return;
-    
-    const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    
-    const clickPos = (mx - dragSlider.x) / dragSlider.width;
-    const newVolume = Math.max(0, Math.min(1, clickPos));
-    
-    if (dragSlider.type === 'master') {
-        setMasterVolume(newVolume);
-    } else if (dragSlider.type === 'music') {
-        setMusicVolume(newVolume);
-    } else if (dragSlider.type === 'sfx') {
-        setSfxVolume(newVolume);
-    }
-});
-
-canvas.addEventListener('mouseup', function() {
-    isDragging = false;
-    dragSlider = null;
-});
-
-// Start the game
+// Start the game when page loads
 init();
