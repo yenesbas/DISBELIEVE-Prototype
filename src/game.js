@@ -11,6 +11,7 @@ LEVEL MAP CHARACTERS:
   '#'  = Ground/Platform (solid block - player collides with it)
   'F'  = Fake block (looks like ground but player passes through it!)
   'I'  = Invisible platform (solid collision but completely invisible!)
+  'S'  = Spawn Point (player starting position)
   'D'  = Door (level exit - player must reach this to complete)
   '1'  = Spike that moves 1 tile  (40px) when triggered
   '2'  = Spike that moves 2 tiles (80px) when triggered
@@ -225,6 +226,7 @@ function setupAudioControls() {
 // '#' = ground/platform (solid - player collides)
 // 'F' = fake block (looks solid but player passes through!)
 // 'I' = invisible platform (solid but completely invisible!)
+// 'S' = spawn point (player starting position)
 // 'D' = door (level exit)
 // '1' = spike that moves 1 tile when triggered
 // '2' = spike that moves 2 tiles when triggered
@@ -256,7 +258,7 @@ const chapters = [
           "....................",
           "....................",
           "....................",
-          "....................",
+          ".S..................",
           "###...............D.",
           "...#...2.....#######",
           "....######.#........"
@@ -272,7 +274,7 @@ const chapters = [
           "....................",
           "....................",
           "....................",
-          "....................",
+          ".S..................",
           "####................",
           "........2...1.....D.",
           ".....###############"
@@ -288,7 +290,7 @@ const chapters = [
           "....................",
           "....................",
           "....................",
-          "...........#........",
+          ".S.........#........",
           "###...........#.###F",
           ".....1...#2...3...D.",
           "...####..#####.#####"
@@ -318,7 +320,7 @@ const chapters = [
           "....................",
           "....................",
           "....................",
-          ".....1..............",
+          ".S...1..............",
           "#####.####..FF######",
           "....................",
           "....................",
@@ -337,7 +339,7 @@ const chapters = [
           "....................",
           "....................",
           "....................",
-          "..................D.",
+          ".S................D.",
           "F##FF#FFF####FFF####",
           "11111111111111111111"
         ],
@@ -353,7 +355,7 @@ const chapters = [
           "...........#........",
           "........#....2......",
           "....#.............D.",
-          "................###.",
+          ".S..............###.",
           ".#..................",
           "..............F.....",
           ".......F............",
@@ -366,7 +368,7 @@ const chapters = [
         map: [
           "....................",
           "....................",
-          ".....#.....FF....D..",
+          ".S...#.....FF....D..",
           ".#.....F...2.....F..",
           ".3.....3........F...",
           "...............#....",
@@ -384,7 +386,7 @@ const chapters = [
         map: [
           "....................",
           "....................",
-          "....................",
+          ".S..................",
           "#######F###########.",
           "..#..2#....#......F.",
           "..#.#.#..F.#.#....F.",
@@ -404,7 +406,7 @@ const chapters = [
           "....................",
           "....................",
           "FFF..24.......12....",
-          "#.#################.",
+          "#S#################.",
           "###...............#.",
           "..................#.",
           "....11#..#...#..#.#.",
@@ -425,7 +427,7 @@ const chapters = [
       map: [
         "....................",
         ".....2..3...3.......",
-        "#.######F##########.",
+        "#S######F##########.",
         ".#......F...#.....#.",
         "..F##F..F...#.....#.",
         "..#..#..#.....#.....",
@@ -456,7 +458,7 @@ const chapters = [
           "....................",
           "....................",
           "....................",
-          ".................D..",
+          ".S...............D..",
           "####II##IIFFF#######",
           "....................",
           "...................."
@@ -577,6 +579,7 @@ let fakeBlocks = []; // Blocks that look solid but player passes through
 let invisiblePlatforms = []; // Platforms that are solid but completely invisible
 let spikes = [];
 let door = null;
+let spawnPoint = null; // Custom spawn point set by 'S' in level map
 let deaths = 0;
 let levelDeaths = 0;
 let isDead = false;
@@ -794,6 +797,7 @@ function parseLevel() {
   invisiblePlatforms = [];
   spikes = [];
   door = null;
+  spawnPoint = null; // Reset custom spawn point for each level
 
   const levelMap = levels[currentLevel].map;
   const customTriggers = levels[currentLevel].spikeTriggers || []; // Get custom triggers if defined
@@ -879,6 +883,9 @@ function parseLevel() {
         spikeIndex++;
       } else if (char === 'D') {
         door = { x, y, width: TILE_SIZE, height: TILE_SIZE };
+      } else if (char === 'S') {
+        // Custom spawn point - store coordinates
+        spawnPoint = { x: x + 15, y: y }; // Offset by 15 for center alignment like default spawn
       }
     }
   }
@@ -886,9 +893,13 @@ function parseLevel() {
 
 // Reset player to starting position
 function resetPlayer() {
+  // Use custom spawn point if available, otherwise default position
+  const startX = spawnPoint ? spawnPoint.x : TILE_SIZE + 15;
+  const startY = spawnPoint ? spawnPoint.y : TILE_SIZE * 2;
+
   player = {
-    x: TILE_SIZE + 15,
-    y: TILE_SIZE * 2,
+    x: startX,
+    y: startY,
     width: 45,
     height: 45,
     vx: 0,
