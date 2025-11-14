@@ -452,14 +452,14 @@ const chapters = [
           "....................",
           "....................",
           "....................",
-          "..................D.",
-          ".................##.",
-          "..............I.....",
-          "...........I........",
-          "........I...........",
-          "###.................",
           "....................",
-          "####################"
+          "....................",
+          "....................",
+          "....................",
+          ".................D..",
+          "####II##IIFFF#######",
+          "....................",
+          "...................."
         ]
         // Simple introduction - clear staircase pattern with invisible platforms
       }
@@ -499,15 +499,55 @@ chapters.forEach(chapter => {
 
 // Helper functions for chapter/level management
 function getChapterFromGlobalLevel(globalLevelIndex) {
-  return Math.floor(globalLevelIndex / 10);
+  let currentIndex = 0;
+  
+  for (let i = 0; i < chapters.length; i++) {
+    const chapterRegularLevels = chapters[i].levels.length;
+    const chapterHasBonus = chapters[i].bonusLevel ? 1 : 0;
+    const chapterTotalLevels = chapterRegularLevels + chapterHasBonus;
+    
+    if (globalLevelIndex < currentIndex + chapterTotalLevels) {
+      return i;
+    }
+    currentIndex += chapterTotalLevels;
+  }
+  
+  return 0; // Default to first chapter
 }
 
 function getLevelInChapterFromGlobalLevel(globalLevelIndex) {
-  return globalLevelIndex % 10;
+  let currentIndex = 0;
+  
+  for (let i = 0; i < chapters.length; i++) {
+    const chapterRegularLevels = chapters[i].levels.length;
+    const chapterHasBonus = chapters[i].bonusLevel ? 1 : 0;
+    const chapterTotalLevels = chapterRegularLevels + chapterHasBonus;
+    
+    if (globalLevelIndex < currentIndex + chapterTotalLevels) {
+      return globalLevelIndex - currentIndex;
+    }
+    currentIndex += chapterTotalLevels;
+  }
+  
+  return 0; // Default to first level
 }
 
 function getGlobalLevelIndex(chapterIndex, levelInChapter) {
-  return chapterIndex * 10 + levelInChapter;
+  let globalIndex = 0;
+  
+  // Add all regular levels from previous chapters
+  for (let i = 0; i < chapterIndex; i++) {
+    globalIndex += chapters[i].levels.length;
+    // Add bonus level count for previous chapters
+    if (chapters[i].bonusLevel) {
+      globalIndex += 1;
+    }
+  }
+  
+  // Add the specific level within current chapter
+  globalIndex += levelInChapter;
+  
+  return globalIndex;
 }
 
 function getCurrentChapterInfo() {
