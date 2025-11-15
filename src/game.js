@@ -310,7 +310,7 @@ const chapters = [
           "#S#################.",
           "###...............#.",
           "..................#.",
-          "....11#..#...#..#.#.",
+          "....11#..#...#..#.F.",
           "....FFF11#211#11#..4",
           ".##################1",
           "....................",
@@ -516,6 +516,29 @@ let pendingGameState = null; // State to transition to after fade out
 let completedLevels = new Set(); // Stores global level indices that have been completed
 let levelStars = {}; // Stores star ratings (1-3) for each level: { globalLevelIndex: stars }
 
+// Player customization
+let playerColor = '#4488ff'; // Default blue
+let playerTrail = 'none'; // 'none', 'fade', 'particles', 'glow'
+let trailHistory = []; // Store recent positions for trail effect
+
+const playerColors = [
+  { name: 'Blue', value: '#4488ff' },
+  { name: 'Red', value: '#ff4444' },
+  { name: 'Green', value: '#44ff44' },
+  { name: 'Purple', value: '#aa44ff' },
+  { name: 'Orange', value: '#ff8844' },
+  { name: 'Cyan', value: '#44ffff' },
+  { name: 'Pink', value: '#ff44aa' },
+  { name: 'Yellow', value: '#ffff44' }
+];
+
+const playerTrails = [
+  { name: 'None', value: 'none', description: 'No trail' },
+  { name: 'Fade', value: 'fade', description: 'Fading trail' },
+  { name: 'Particles', value: 'particles', description: 'Particle effect' },
+  { name: 'Glow', value: 'glow', description: 'Glowing aura' }
+];
+
 // Star rating thresholds (deaths required for each star)
 const STAR_THRESHOLDS = {
   3: 0,   // 3 stars: 0 deaths (perfect!)
@@ -540,6 +563,8 @@ function loadProgress() {
       const parsed = JSON.parse(saved);
       completedLevels = new Set(parsed.completedLevels || []);
       levelStars = parsed.levelStars || {};
+      playerColor = parsed.playerColor || '#4488ff';
+      playerTrail = parsed.playerTrail || 'none';
     }
   } catch (e) {
     console.warn('Could not load progress:', e);
@@ -550,7 +575,9 @@ function saveProgress() {
   try {
     const data = {
       completedLevels: Array.from(completedLevels),
-      levelStars: levelStars
+      levelStars: levelStars,
+      playerColor: playerColor,
+      playerTrail: playerTrail
     };
     localStorage.setItem('disbelieveProgress', JSON.stringify(data));
   } catch (e) {
@@ -837,6 +864,7 @@ function resetPlayer() {
 
   isDead = false;
   deathFlashTimer = 0;
+  trailHistory = []; // Clear trail when resetting
 }
 
 // Update game state
@@ -1071,6 +1099,22 @@ function update(deltaTime) {
   if (player.y > canvas.height + 100) {
     die();
   }
+  
+  // Update trail history (only during gameplay)
+  if (gameState === 'playing' && !isDead) {
+    trailHistory.push({ x: player.x, y: player.y, alpha: 1.0 });
+    
+    // Keep only last 15 positions
+    if (trailHistory.length > 15) {
+      trailHistory.shift();
+    }
+    
+    // Fade out trail positions
+    trailHistory.forEach((pos, index) => {
+      pos.alpha -= deltaTime * 3;
+      if (pos.alpha < 0) pos.alpha = 0;
+    });
+  }
 }
 
 // Complete current level
@@ -1175,6 +1219,13 @@ function render() {
   // Menu screen
   if (gameState === 'menu') {
     drawMenu();
+    renderTransition();
+    return;
+  }
+
+  // Customization screen
+  if (gameState === 'customize') {
+    drawCustomization();
     renderTransition();
     return;
   }
@@ -1320,23 +1371,14 @@ function render() {
     }
   });
 
+  // Draw player trail effect (before player so it appears behind)
+  if (!isDead && (gameState === 'playing' || gameState === 'paused')) {
+    drawPlayerTrail();
+  }
+
   // Draw player
   if (!isDead && (gameState === 'playing' || gameState === 'paused')) {
-    ctx.fillStyle = '#4488ff';
-    ctx.fillRect(player.x, player.y, player.width, player.height);
-
-    // Player outline
-    ctx.strokeStyle = '#2266dd';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(player.x, player.y, player.width, player.height);
-
-    // Simple eyes (scaled for 45x45 player)
-    ctx.fillStyle = 'white';
-    ctx.fillRect(player.x + 12, player.y + 12, 9, 9);
-    ctx.fillRect(player.x + 24, player.y + 12, 9, 9);
-    ctx.fillStyle = 'black';
-    ctx.fillRect(player.x + 15, player.y + 15, 4, 4);
-    ctx.fillRect(player.x + 27, player.y + 15, 4, 4);
+    drawPlayer(player.x, player.y, player.width, player.height);
   }
 
   // Death flash
@@ -1569,10 +1611,321 @@ function drawMenu() {
     action: 'settings'
   });
 
+  // Customize button
+  let customizeY = 460;
+  ctx.fillStyle = '#444444';
+  ctx.fillRect(startX, customizeY, 300, 60);
+  ctx.strokeStyle = '#888888';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(startX, customizeY, 300, 60);
+  
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 36px Impact, monospace';
+  ctx.fillText('CUSTOMIZE', canvas.width / 2, customizeY + 40);
+  
+  window.menuButtons.push({
+    x: startX,
+    y: customizeY,
+    width: 300,
+    height: 60,
+    action: 'customize'
+  });
+
   // Instructions
   ctx.fillStyle = '#666666';
   ctx.font = '26px monospace';
   ctx.fillText('Hint: DISBELIEVE WHAT YOU SEE', canvas.width / 2, canvas.height - 50);
+
+  ctx.textAlign = 'left';
+}
+
+// Draw player with current customization
+function drawPlayer(x, y, width, height) {
+  const outlineColor = adjustBrightness(playerColor, -0.3);
+  
+  // Always draw as square
+  ctx.fillStyle = playerColor;
+  ctx.fillRect(x, y, width, height);
+  ctx.strokeStyle = outlineColor;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x, y, width, height);
+  
+  // Eyes
+  ctx.fillStyle = 'white';
+  ctx.fillRect(x + 12, y + 12, 9, 9);
+  ctx.fillRect(x + 24, y + 12, 9, 9);
+  ctx.fillStyle = 'black';
+  ctx.fillRect(x + 15, y + 15, 4, 4);
+  ctx.fillRect(x + 27, y + 15, 4, 4);
+}
+
+// Draw player trail effect
+function drawPlayerTrail() {
+  if (playerTrail === 'none' || trailHistory.length === 0) return;
+  
+  if (playerTrail === 'fade') {
+    // Fading trail - draw previous positions with decreasing opacity
+    trailHistory.forEach((pos, index) => {
+      const alpha = pos.alpha * 0.5;
+      const trailColor = playerColor.replace('#', '');
+      const r = parseInt(trailColor.substr(0, 2), 16);
+      const g = parseInt(trailColor.substr(2, 2), 16);
+      const b = parseInt(trailColor.substr(4, 2), 16);
+      
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+      ctx.fillRect(pos.x, pos.y, player.width, player.height);
+    });
+  } else if (playerTrail === 'particles') {
+    // Particle trail - small squares scattered behind
+    trailHistory.forEach((pos, index) => {
+      if (index % 2 === 0) { // Only every other position
+        const alpha = pos.alpha * 0.7;
+        const trailColor = playerColor.replace('#', '');
+        const r = parseInt(trailColor.substr(0, 2), 16);
+        const g = parseInt(trailColor.substr(2, 2), 16);
+        const b = parseInt(trailColor.substr(4, 2), 16);
+        
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        const size = 8;
+        ctx.fillRect(pos.x + player.width/2 - size/2, pos.y + player.height/2 - size/2, size, size);
+        ctx.fillRect(pos.x + player.width/4, pos.y + player.height/4, size, size);
+        ctx.fillRect(pos.x + 3*player.width/4, pos.y + 3*player.height/4, size, size);
+      }
+    });
+  } else if (playerTrail === 'glow') {
+    // Glowing aura - circular glow around player
+    const trailColor = playerColor.replace('#', '');
+    const r = parseInt(trailColor.substr(0, 2), 16);
+    const g = parseInt(trailColor.substr(2, 2), 16);
+    const b = parseInt(trailColor.substr(4, 2), 16);
+    
+    // Draw multiple circles with decreasing opacity for glow effect
+    for (let i = 3; i > 0; i--) {
+      const radius = player.width/2 + i * 8;
+      const alpha = 0.15 - (i * 0.03);
+      
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+      ctx.beginPath();
+      ctx.arc(player.x + player.width/2, player.y + player.height/2, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+// Helper to adjust color brightness
+function adjustBrightness(color, percent) {
+  const num = parseInt(color.replace('#', ''), 16);
+  const amt = Math.round(2.55 * percent * 100);
+  const R = (num >> 16) + amt;
+  const G = (num >> 8 & 0x00FF) + amt;
+  const B = (num & 0x0000FF) + amt;
+  return '#' + (0x1000000 + (R < 255 ? R < 1 ? 0 : R : 255) * 0x10000 +
+    (G < 255 ? G < 1 ? 0 : G : 255) * 0x100 +
+    (B < 255 ? B < 1 ? 0 : B : 255)).toString(16).slice(1);
+}
+
+// Draw customization screen
+function drawCustomization() {
+  ctx.fillStyle = '#2a2a2a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Title
+  ctx.fillStyle = '#9844ffff';
+  ctx.font = 'bold 72px Impact, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('CUSTOMIZE PLAYER', canvas.width / 2, 100);
+
+  window.customizeButtons = [];
+
+  // Color selection
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 36px Impact, monospace';
+  ctx.fillText('COLOR', canvas.width / 2, 180);
+
+  const colorBoxSize = 60;
+  const colorSpacing = 80;
+  const colorStartX = canvas.width / 2 - (playerColors.length * colorSpacing) / 2 + colorSpacing / 2;
+  const colorY = 200;
+
+  playerColors.forEach((color, index) => {
+    const x = colorStartX + index * colorSpacing - colorBoxSize / 2;
+    
+    // Draw color box
+    ctx.fillStyle = color.value;
+    ctx.fillRect(x, colorY, colorBoxSize, colorBoxSize);
+    
+    // Highlight selected
+    if (playerColor === color.value) {
+      ctx.strokeStyle = '#ffff44';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(x - 4, colorY - 4, colorBoxSize + 8, colorBoxSize + 8);
+    } else {
+      ctx.strokeStyle = '#888888';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, colorY, colorBoxSize, colorBoxSize);
+    }
+    
+    // Color name
+    ctx.fillStyle = '#aaaaaa';
+    ctx.font = '16px monospace';
+    ctx.fillText(color.name, x + colorBoxSize / 2, colorY + colorBoxSize + 20);
+    
+    window.customizeButtons.push({
+      x: x,
+      y: colorY,
+      width: colorBoxSize,
+      height: colorBoxSize,
+      action: 'color',
+      value: color.value
+    });
+  });
+
+  // Trail selection
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 36px Impact, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('TRAIL EFFECT', canvas.width / 2, 360);
+
+  const trailBoxSize = 100;
+  const trailSpacing = 140;
+  const trailStartX = canvas.width / 2 - (playerTrails.length * trailSpacing) / 2 + trailSpacing / 2;
+  const trailY = 390;
+
+  playerTrails.forEach((trail, index) => {
+    const x = trailStartX + index * trailSpacing - trailBoxSize / 2;
+    
+    // Draw background box
+    ctx.fillStyle = '#333333';
+    ctx.fillRect(x, trailY, trailBoxSize, trailBoxSize);
+    
+    // Draw trail preview
+    ctx.fillStyle = playerColor;
+    const centerX = x + trailBoxSize / 2;
+    const centerY = trailY + trailBoxSize / 2;
+    const boxSize = 25;
+    
+    if (trail.value === 'none') {
+      // Just the player box
+      ctx.fillRect(centerX - boxSize/2, centerY - boxSize/2, boxSize, boxSize);
+    } else if (trail.value === 'fade') {
+      // Fading squares
+      for (let i = 3; i >= 0; i--) {
+        const alpha = (i + 1) * 0.2;
+        const offset = (3 - i) * 8;
+        const trailColor = playerColor.replace('#', '');
+        const r = parseInt(trailColor.substr(0, 2), 16);
+        const g = parseInt(trailColor.substr(2, 2), 16);
+        const b = parseInt(trailColor.substr(4, 2), 16);
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        ctx.fillRect(centerX - boxSize/2 - offset, centerY - boxSize/2, boxSize, boxSize);
+      }
+    } else if (trail.value === 'particles') {
+      // Main box
+      ctx.fillRect(centerX - boxSize/2, centerY - boxSize/2, boxSize, boxSize);
+      // Particle dots
+      const trailColor = playerColor.replace('#', '');
+      const r = parseInt(trailColor.substr(0, 2), 16);
+      const g = parseInt(trailColor.substr(2, 2), 16);
+      const b = parseInt(trailColor.substr(4, 2), 16);
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.6)`;
+      for (let i = 0; i < 8; i++) {
+        const particleX = centerX - 35 + Math.random() * 40;
+        const particleY = centerY - 10 + Math.random() * 20;
+        ctx.fillRect(particleX, particleY, 4, 4);
+      }
+    } else if (trail.value === 'glow') {
+      // Glowing circles
+      const trailColor = playerColor.replace('#', '');
+      const r = parseInt(trailColor.substr(0, 2), 16);
+      const g = parseInt(trailColor.substr(2, 2), 16);
+      const b = parseInt(trailColor.substr(4, 2), 16);
+      
+      for (let i = 3; i > 0; i--) {
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.15 - i * 0.03})`;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, boxSize/2 + i * 6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Main box
+      ctx.fillStyle = playerColor;
+      ctx.fillRect(centerX - boxSize/2, centerY - boxSize/2, boxSize, boxSize);
+    }
+    
+    // Highlight selected
+    if (playerTrail === trail.value) {
+      ctx.strokeStyle = '#ffff44';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(x - 4, trailY - 4, trailBoxSize + 8, trailBoxSize + 8);
+    } else {
+      ctx.strokeStyle = '#888888';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, trailY, trailBoxSize, trailBoxSize);
+    }
+    
+    // Trail name
+    ctx.fillStyle = '#aaaaaa';
+    ctx.font = '18px monospace';
+    ctx.fillText(trail.name, x + trailBoxSize / 2, trailY + trailBoxSize + 20);
+    
+    window.customizeButtons.push({
+      x: x,
+      y: trailY,
+      width: trailBoxSize,
+      height: trailBoxSize,
+      action: 'trail',
+      value: trail.value
+    });
+  });
+
+  // Preview
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 36px Impact, monospace';
+  ctx.fillText('PREVIEW', canvas.width / 2, 560);
+  
+  const previewX = canvas.width / 2 - 50;
+  const previewY = 580;
+  
+  // Draw trail preview
+  if (playerTrail !== 'none') {
+    const mockTrail = [];
+    for (let i = 0; i < 8; i++) {
+      mockTrail.push({ x: previewX - i * 12, y: previewY, alpha: 1 - i * 0.12 });
+    }
+    
+    const savedTrail = trailHistory;
+    const savedPlayer = player;
+    trailHistory = mockTrail;
+    player = { x: previewX, y: previewY, width: 100, height: 100 };
+    drawPlayerTrail();
+    trailHistory = savedTrail;
+    player = savedPlayer;
+  }
+  
+  drawPlayer(previewX, previewY, 100, 100);
+
+  // Back button
+  const backButtonWidth = 200;
+  const backButtonHeight = 50;
+  const backButtonX = canvas.width / 2 - backButtonWidth / 2;
+  const backButtonY = canvas.height - 100;
+  
+  ctx.fillStyle = '#444444';
+  ctx.fillRect(backButtonX, backButtonY, backButtonWidth, backButtonHeight);
+  ctx.strokeStyle = '#888888';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(backButtonX, backButtonY, backButtonWidth, backButtonHeight);
+  
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 30px Impact, monospace';
+  ctx.fillText('BACK', canvas.width / 2, backButtonY + 35);
+  
+  window.customizeButtons.push({
+    x: backButtonX,
+    y: backButtonY,
+    width: backButtonWidth,
+    height: backButtonHeight,
+    action: 'back'
+  });
 
   ctx.textAlign = 'left';
 }
@@ -2001,6 +2354,27 @@ function handleClick(event) {
         } else if (button.action === 'settings') {
           previousGameState = gameState;
           transitionToState('settings');
+        } else if (button.action === 'customize') {
+          previousGameState = gameState;
+          transitionToState('customize');
+        }
+      }
+    });
+  }
+
+  // Check customization buttons
+  if (gameState === 'customize' && window.customizeButtons) {
+    window.customizeButtons.forEach(button => {
+      if (x >= button.x && x <= button.x + button.width &&
+          y >= button.y && y <= button.y + button.height) {
+        if (button.action === 'color') {
+          playerColor = button.value;
+          saveProgress();
+        } else if (button.action === 'trail') {
+          playerTrail = button.value;
+          saveProgress();
+        } else if (button.action === 'back') {
+          transitionToState(previousGameState || 'menu');
         }
       }
     });
@@ -2171,6 +2545,8 @@ window.addEventListener('keydown', (e) => {
     } else if (gameState === 'paused') {
       gameState = 'playing';
     } else if (gameState === 'settings') {
+      transitionToState(previousGameState || 'menu');
+    } else if (gameState === 'customize') {
       transitionToState(previousGameState || 'menu');
     } else if (gameState === 'chapterSelect') {
       transitionToState('menu');
