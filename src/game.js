@@ -1650,13 +1650,24 @@ function drawPlayer(x, y, width, height) {
   ctx.lineWidth = 2;
   ctx.strokeRect(x, y, width, height);
   
-  // Eyes
+  // Eyes - scaled proportionally to player size
+  const scale = width / 45; // 45 is the default player size
+  const eyeWidth = 9 * scale;
+  const eyeHeight = 9 * scale;
+  const pupilWidth = 4 * scale;
+  const pupilHeight = 4 * scale;
+  const eyeOffsetX = 12 * scale;
+  const eyeOffsetY = 12 * scale;
+  const eyeSpacing = 12 * scale;
+  const pupilOffsetX = 3 * scale;
+  const pupilOffsetY = 3 * scale;
+  
   ctx.fillStyle = 'white';
-  ctx.fillRect(x + 12, y + 12, 9, 9);
-  ctx.fillRect(x + 24, y + 12, 9, 9);
+  ctx.fillRect(x + eyeOffsetX, y + eyeOffsetY, eyeWidth, eyeHeight);
+  ctx.fillRect(x + eyeOffsetX + eyeSpacing, y + eyeOffsetY, eyeWidth, eyeHeight);
   ctx.fillStyle = 'black';
-  ctx.fillRect(x + 15, y + 15, 4, 4);
-  ctx.fillRect(x + 27, y + 15, 4, 4);
+  ctx.fillRect(x + eyeOffsetX + pupilOffsetX, y + eyeOffsetY + pupilOffsetY, pupilWidth, pupilHeight);
+  ctx.fillRect(x + eyeOffsetX + eyeSpacing + pupilOffsetX, y + eyeOffsetY + pupilOffsetY, pupilWidth, pupilHeight);
 }
 
 // Draw player trail effect
@@ -1877,13 +1888,13 @@ function drawCustomization() {
     });
   });
 
-  // Preview
+  // Preview (moved lower)
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 36px Impact, monospace';
-  ctx.fillText('PREVIEW', canvas.width / 2, 560);
+  ctx.fillText('PREVIEW', canvas.width / 2, 570);
   
   const previewX = canvas.width / 2 - 50;
-  const previewY = 580;
+  const previewY = 590;
   
   // Draw trail preview
   if (playerTrail !== 'none') {
@@ -1903,27 +1914,25 @@ function drawCustomization() {
   
   drawPlayer(previewX, previewY, 100, 100);
 
-  // Back button
-  const backButtonWidth = 200;
-  const backButtonHeight = 50;
-  const backButtonX = canvas.width / 2 - backButtonWidth / 2;
-  const backButtonY = canvas.height - 100;
+  // Back button (positioned like settings menu - bottom left)
+  const backX = 50;
+  const backY = canvas.height - 80;
   
   ctx.fillStyle = '#444444';
-  ctx.fillRect(backButtonX, backButtonY, backButtonWidth, backButtonHeight);
+  ctx.fillRect(backX, backY, 120, 50);
   ctx.strokeStyle = '#888888';
   ctx.lineWidth = 3;
-  ctx.strokeRect(backButtonX, backButtonY, backButtonWidth, backButtonHeight);
+  ctx.strokeRect(backX, backY, 120, 50);
   
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 30px Impact, monospace';
-  ctx.fillText('BACK', canvas.width / 2, backButtonY + 35);
+  ctx.font = '24px monospace';
+  ctx.fillText('BACK', backX + 60, backY + 32);
   
   window.customizeButtons.push({
-    x: backButtonX,
-    y: backButtonY,
-    width: backButtonWidth,
-    height: backButtonHeight,
+    x: backX,
+    y: backY,
+    width: 120,
+    height: 50,
     action: 'back'
   });
 
