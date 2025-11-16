@@ -1472,9 +1472,17 @@ function drawPauseMenu() {
   const buttonSpacing = 80;
 
   // Resume button
-  ctx.fillStyle = '#444444';
+  const resumeButton = {
+    x: buttonX,
+    y: buttonY,
+    width: buttonWidth,
+    height: buttonHeight,
+    action: 'resume'
+  };
+  
+  ctx.fillStyle = isButtonHovered(resumeButton) ? '#555555' : '#444444';
   ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
-  ctx.strokeStyle = '#888888';
+  ctx.strokeStyle = isButtonHovered(resumeButton) ? '#aaaaaa' : '#888888';
   ctx.lineWidth = 3;
   ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
   ctx.fillStyle = '#ffffff';
@@ -1482,70 +1490,70 @@ function drawPauseMenu() {
   ctx.textAlign = 'center';
   ctx.fillText('RESUME', canvas.width / 2, buttonY + 40);
   
-  window.pauseButtons.push({
+  window.pauseButtons.push(resumeButton);
+
+  // Restart button
+  buttonY += buttonSpacing;
+  const restartButton = {
     x: buttonX,
     y: buttonY,
     width: buttonWidth,
     height: buttonHeight,
-    action: 'resume'
-  });
-
-  // Restart button
-  buttonY += buttonSpacing;
-  ctx.fillStyle = '#444444';
+    action: 'restart'
+  };
+  
+  ctx.fillStyle = isButtonHovered(restartButton) ? '#555555' : '#444444';
   ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
-  ctx.strokeStyle = '#888888';
+  ctx.strokeStyle = isButtonHovered(restartButton) ? '#aaaaaa' : '#888888';
   ctx.lineWidth = 3;
   ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 36px Impact, monospace';
   ctx.fillText('RESTART', canvas.width / 2, buttonY + 40);
   
-  window.pauseButtons.push({
+  window.pauseButtons.push(restartButton);
+
+  // Settings button
+  buttonY += buttonSpacing;
+  const settingsButton = {
     x: buttonX,
     y: buttonY,
     width: buttonWidth,
     height: buttonHeight,
-    action: 'restart'
-  });
-
-  // Settings button
-  buttonY += buttonSpacing;
-  ctx.fillStyle = '#444444';
+    action: 'settings'
+  };
+  
+  ctx.fillStyle = isButtonHovered(settingsButton) ? '#555555' : '#444444';
   ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
-  ctx.strokeStyle = '#888888';
+  ctx.strokeStyle = isButtonHovered(settingsButton) ? '#aaaaaa' : '#888888';
   ctx.lineWidth = 3;
   ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 36px Impact, monospace';
   ctx.fillText('SETTINGS', canvas.width / 2, buttonY + 40);
   
-  window.pauseButtons.push({
+  window.pauseButtons.push(settingsButton);
+
+  // Quit to Menu button
+  buttonY += buttonSpacing;
+  const quitButton = {
     x: buttonX,
     y: buttonY,
     width: buttonWidth,
     height: buttonHeight,
-    action: 'settings'
-  });
-
-  // Quit to Menu button
-  buttonY += buttonSpacing;
-  ctx.fillStyle = '#444444';
+    action: 'quit'
+  };
+  
+  ctx.fillStyle = isButtonHovered(quitButton) ? '#555555' : '#444444';
   ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
-  ctx.strokeStyle = '#888888';
+  ctx.strokeStyle = isButtonHovered(quitButton) ? '#aaaaaa' : '#888888';
   ctx.lineWidth = 3;
   ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 36px Impact, monospace';
   ctx.fillText('QUIT TO MENU', canvas.width / 2, buttonY + 40);
   
-  window.pauseButtons.push({
-    x: buttonX,
-    y: buttonY,
-    width: buttonWidth,
-    height: buttonHeight,
-    action: 'quit'
-  });
+  window.pauseButtons.push(quitButton);
 
   // Instructions
   ctx.fillStyle = '#aaaaaa';
@@ -1676,7 +1684,7 @@ function drawPlayerTrail() {
       ctx.fillRect(pos.x, pos.y, player.width, player.height);
     });
   } else if (playerTrail === 'particles') {
-    // Particle trail - small squares scattered behind
+    // Particle trail - small squares scattered randomly behind
     trailHistory.forEach((pos, index) => {
       if (index % 2 === 0) { // Only every other position
         const alpha = pos.alpha * 0.7;
@@ -1687,9 +1695,22 @@ function drawPlayerTrail() {
         
         ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
         const size = 8;
-        ctx.fillRect(pos.x + player.width/2 - size/2, pos.y + player.height/2 - size/2, size, size);
-        ctx.fillRect(pos.x + player.width/4, pos.y + player.height/4, size, size);
-        ctx.fillRect(pos.x + 3*player.width/4, pos.y + 3*player.height/4, size, size);
+        
+        // Generate 3-5 random particles per trail position
+        const numParticles = 3 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < numParticles; i++) {
+          // Random offset within player bounds
+          const offsetX = (Math.random() - 0.5) * player.width;
+          const offsetY = (Math.random() - 0.5) * player.height;
+          const particleSize = size * (0.5 + Math.random() * 0.5); // Vary particle size
+          
+          ctx.fillRect(
+            pos.x + player.width/2 + offsetX - particleSize/2, 
+            pos.y + player.height/2 + offsetY - particleSize/2, 
+            particleSize, 
+            particleSize
+          );
+        }
       }
     });
   } else if (playerTrail === 'glow') {
