@@ -650,6 +650,10 @@ const keys = {
   r: false
 };
 
+// Mouse position tracking for hover effects
+let mouseX = 0;
+let mouseY = 0;
+
 // Track document visibility
 let isVisible = true;
 
@@ -1573,63 +1577,48 @@ function drawMenu() {
   // Start Game button
   let startX = canvas.width / 2 - 150;
   let startY = 300;
-  ctx.fillStyle = '#444444';
+  const startButton = { x: startX, y: startY, width: 300, height: 60, action: 'startGame' };
+  ctx.fillStyle = isButtonHovered(startButton) ? '#555555' : '#444444';
   ctx.fillRect(startX, startY, 300, 60);
-  ctx.strokeStyle = '#888888';
+  ctx.strokeStyle = isButtonHovered(startButton) ? '#aaaaaa' : '#888888';
   ctx.lineWidth = 3;
   ctx.strokeRect(startX, startY, 300, 60);
   
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 36px Impact, monospace';
+  ctx.font = '32px Arial, sans-serif';
   ctx.fillText('START GAME', canvas.width / 2, startY + 40);
   
-  window.menuButtons.push({
-    x: startX,
-    y: startY,
-    width: 300,
-    height: 60,
-    action: 'startGame'
-  });
+  window.menuButtons.push(startButton);
 
   // Settings button
   let settingsY = 380;
-  ctx.fillStyle = '#444444';
+  const settingsButton = { x: startX, y: settingsY, width: 300, height: 60, action: 'settings' };
+  ctx.fillStyle = isButtonHovered(settingsButton) ? '#555555' : '#444444';
   ctx.fillRect(startX, settingsY, 300, 60);
-  ctx.strokeStyle = '#888888';
+  ctx.strokeStyle = isButtonHovered(settingsButton) ? '#aaaaaa' : '#888888';
   ctx.lineWidth = 3;
   ctx.strokeRect(startX, settingsY, 300, 60);
   
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 36px Impact, monospace';
+  ctx.font = '32px Arial, sans-serif';
   ctx.fillText('SETTINGS', canvas.width / 2, settingsY + 40);
   
-  window.menuButtons.push({
-    x: startX,
-    y: settingsY,
-    width: 300,
-    height: 60,
-    action: 'settings'
-  });
+  window.menuButtons.push(settingsButton);
 
   // Customize button
   let customizeY = 460;
-  ctx.fillStyle = '#444444';
+  const customizeButton = { x: startX, y: customizeY, width: 300, height: 60, action: 'customize' };
+  ctx.fillStyle = isButtonHovered(customizeButton) ? '#555555' : '#444444';
   ctx.fillRect(startX, customizeY, 300, 60);
-  ctx.strokeStyle = '#888888';
+  ctx.strokeStyle = isButtonHovered(customizeButton) ? '#aaaaaa' : '#888888';
   ctx.lineWidth = 3;
   ctx.strokeRect(startX, customizeY, 300, 60);
   
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 36px Impact, monospace';
+  ctx.font = '32px Arial, sans-serif';
   ctx.fillText('CUSTOMIZE', canvas.width / 2, customizeY + 40);
   
-  window.menuButtons.push({
-    x: startX,
-    y: customizeY,
-    width: 300,
-    height: 60,
-    action: 'customize'
-  });
+  window.menuButtons.push(customizeButton);
 
   // Instructions
   ctx.fillStyle = '#666666';
@@ -1735,6 +1724,12 @@ function adjustBrightness(color, percent) {
     (B < 255 ? B < 1 ? 0 : B : 255)).toString(16).slice(1);
 }
 
+// Check if mouse is hovering over a button
+function isButtonHovered(button) {
+  return mouseX >= button.x && mouseX <= button.x + button.width &&
+         mouseY >= button.y && mouseY <= button.y + button.height;
+}
+
 // Draw customization screen
 function drawCustomization() {
   ctx.fillStyle = '#2a2a2a';
@@ -1760,16 +1755,21 @@ function drawCustomization() {
 
   playerColors.forEach((color, index) => {
     const x = colorStartX + index * colorSpacing - colorBoxSize / 2;
+    const colorBox = { x: x, y: colorY, width: colorBoxSize, height: colorBoxSize };
     
     // Draw color box
     ctx.fillStyle = color.value;
     ctx.fillRect(x, colorY, colorBoxSize, colorBoxSize);
     
-    // Highlight selected
+    // Highlight selected or hovered
     if (playerColor === color.value) {
       ctx.strokeStyle = '#ffff44';
       ctx.lineWidth = 4;
       ctx.strokeRect(x - 4, colorY - 4, colorBoxSize + 8, colorBoxSize + 8);
+    } else if (isButtonHovered(colorBox)) {
+      ctx.strokeStyle = '#aaaaaa';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x - 2, colorY - 2, colorBoxSize + 4, colorBoxSize + 4);
     } else {
       ctx.strokeStyle = '#888888';
       ctx.lineWidth = 2;
@@ -1862,11 +1862,17 @@ function drawCustomization() {
       ctx.fillRect(centerX - boxSize/2, centerY - boxSize/2, boxSize, boxSize);
     }
     
-    // Highlight selected
+    const trailBox = { x: x, y: trailY, width: trailBoxSize, height: trailBoxSize };
+    
+    // Highlight selected or hovered
     if (playerTrail === trail.value) {
       ctx.strokeStyle = '#ffff44';
       ctx.lineWidth = 4;
       ctx.strokeRect(x - 4, trailY - 4, trailBoxSize + 8, trailBoxSize + 8);
+    } else if (isButtonHovered(trailBox)) {
+      ctx.strokeStyle = '#aaaaaa';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x - 2, trailY - 2, trailBoxSize + 4, trailBoxSize + 4);
     } else {
       ctx.strokeStyle = '#888888';
       ctx.lineWidth = 2;
@@ -1917,10 +1923,11 @@ function drawCustomization() {
   // Back button (positioned like settings menu - bottom left)
   const backX = 50;
   const backY = canvas.height - 80;
+  const backBtn = { x: backX, y: backY, width: 120, height: 50, action: 'back' };
   
-  ctx.fillStyle = '#444444';
+  ctx.fillStyle = isButtonHovered(backBtn) ? '#555555' : '#444444';
   ctx.fillRect(backX, backY, 120, 50);
-  ctx.strokeStyle = '#888888';
+  ctx.strokeStyle = isButtonHovered(backBtn) ? '#aaaaaa' : '#888888';
   ctx.lineWidth = 3;
   ctx.strokeRect(backX, backY, 120, 50);
   
@@ -1928,15 +1935,37 @@ function drawCustomization() {
   ctx.font = '24px monospace';
   ctx.fillText('BACK', backX + 60, backY + 32);
   
-  window.customizeButtons.push({
-    x: backX,
-    y: backY,
-    width: 120,
-    height: 50,
-    action: 'back'
-  });
+  window.customizeButtons.push(backBtn);
 
   ctx.textAlign = 'left';
+}
+
+// Get chapter-specific colors
+function getChapterColors(chapterIndex) {
+  const colors = [
+    { primary: '#8c44ff', secondary: '#6622dd', accent: '#a055ff' }, // Chapter 1: Purple
+    { primary: '#44aaff', secondary: '#2288dd', accent: '#55bbff' }, // Chapter 2: Blue
+    { primary: '#ff8844', secondary: '#dd6622', accent: '#ff9955' }, // Chapter 3: Orange
+    { primary: '#44ff88', secondary: '#22dd66', accent: '#55ff99' }  // Chapter 4: Green
+  ];
+  return colors[chapterIndex % colors.length];
+}
+
+// Get chapter completion percentage
+function getChapterCompletion(chapterIndex) {
+  if (chapterIndex >= chapters.length) return 0;
+  
+  const chapter = chapters[chapterIndex];
+  const totalLevels = chapter.levels.length; // Only count regular levels, not bonus
+  let completedCount = 0;
+  
+  // Count completed regular levels only
+  for (let i = 0; i < chapter.levels.length; i++) {
+    const globalIndex = getGlobalLevelIndex(chapterIndex, i);
+    if (completedLevels.has(globalIndex)) completedCount++;
+  }
+  
+  return totalLevels > 0 ? (completedCount / totalLevels) * 100 : 0;
 }
 
 // Draw chapter selection screen
@@ -1955,48 +1984,117 @@ function drawChapterSelect() {
   
   for (let i = 0; i < chapters.length; i++) {
     const chapter = chapters[i];
-    const buttonWidth = 500;
-    const buttonHeight = 100;
+    const buttonWidth = 550;
+    const buttonHeight = 120;
     const buttonX = canvas.width / 2 - buttonWidth / 2;
-    const buttonY = 220 + i * 130;
+    const buttonY = 220 + i * 140;
     
-    // Draw button background
-    ctx.fillStyle = '#444444';
-    ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
-    ctx.strokeStyle = '#888888';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
-    
-    // Chapter number
-    ctx.fillStyle = '#8c44ff';
-    ctx.font = 'bold 36px Impact, monospace';
-    ctx.fillText(`Chapter ${i + 1}`, canvas.width / 2, buttonY + 35);
-    
-    // Chapter name
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 24px monospace';
-    ctx.fillText(chapter.name.replace(`Chapter ${i + 1}: `, ''), canvas.width / 2, buttonY + 65);
-    
-    // Chapter description
-    ctx.fillStyle = '#aaaaaa';
-    ctx.font = '18px monospace';
-    ctx.fillText(chapter.description, canvas.width / 2, buttonY + 85);
-    
-    window.chapterButtons.push({
+    const chapterBtn = {
       x: buttonX,
       y: buttonY,
       width: buttonWidth,
       height: buttonHeight,
       chapter: i
-    });
+    };
+    
+    const colors = getChapterColors(i);
+    const completion = getChapterCompletion(i);
+    const isHovered = isButtonHovered(chapterBtn);
+    
+    // Draw button background with gradient
+    const gradient = ctx.createLinearGradient(buttonX, buttonY, buttonX, buttonY + buttonHeight);
+    gradient.addColorStop(0, isHovered ? '#4a4a4a' : '#3a3a3a');
+    gradient.addColorStop(1, isHovered ? '#555555' : '#444444');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
+    
+    // Colored left accent bar
+    ctx.fillStyle = colors.primary;
+    ctx.fillRect(buttonX, buttonY, 8, buttonHeight);
+    
+    // Border with chapter color when hovered
+    ctx.strokeStyle = isHovered ? colors.accent : '#888888';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
+    
+    // Chapter icon/number circle on the left
+    const iconX = buttonX + 45;
+    const iconY = buttonY + buttonHeight / 2;
+    const iconRadius = 30;
+    
+    ctx.fillStyle = colors.secondary;
+    ctx.beginPath();
+    ctx.arc(iconX, iconY, iconRadius, 0, Math.PI * 2);
+    ctx.fill();
+    
+    ctx.strokeStyle = colors.accent;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 32px Impact, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(i + 1, iconX, iconY + 10);
+    
+    // Chapter name and description
+    ctx.textAlign = 'left';
+    ctx.fillStyle = colors.primary;
+    ctx.font = '26px Arial, sans-serif';
+    ctx.fillText(chapter.name.replace(`Chapter ${i + 1}: `, ''), buttonX + 90, buttonY + 35);
+    
+    ctx.fillStyle = '#cccccc';
+    ctx.font = '18px monospace';
+    ctx.fillText(chapter.description, buttonX + 90, buttonY + 60);
+    
+    // Completion percentage bar and text
+    const barWidth = 120;
+    const barHeight = 12;
+    const barX = buttonX + buttonWidth - barWidth - 20;
+    const barY = buttonY + buttonHeight - 30;
+    
+    // Background bar
+    ctx.fillStyle = '#222222';
+    ctx.fillRect(barX, barY, barWidth, barHeight);
+    
+    // Progress bar
+    ctx.fillStyle = completion === 100 ? '#44ff44' : colors.primary;
+    ctx.fillRect(barX, barY, (barWidth * completion) / 100, barHeight);
+    
+    // Bar border
+    ctx.strokeStyle = '#666666';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(barX, barY, barWidth, barHeight);
+    
+    // Completion text
+    ctx.fillStyle = completion === 100 ? '#44ff44' : '#ffffff';
+    ctx.font = 'bold 14px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(`${Math.floor(completion)}%`, buttonX + buttonWidth - 150, buttonY + buttonHeight - 32);
+    
+    // Completion status icon
+    if (completion === 100) {
+      ctx.fillStyle = '#44ff44';
+      ctx.font = '24px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText('✓', buttonX + buttonWidth - 15, buttonY + 35);
+    }
+    
+    window.chapterButtons.push(chapterBtn);
   }
 
   // Back button
   let backX = 50;
   let backY = canvas.height - 100;
-  ctx.fillStyle = '#444444';
+  window.backButton = {
+    x: backX,
+    y: backY,
+    width: 120,
+    height: 50
+  };
+  
+  ctx.fillStyle = isButtonHovered(window.backButton) ? '#555555' : '#444444';
   ctx.fillRect(backX, backY, 120, 50);
-  ctx.strokeStyle = '#888888';
+  ctx.strokeStyle = isButtonHovered(window.backButton) ? '#aaaaaa' : '#888888';
   ctx.lineWidth = 3;
   ctx.strokeRect(backX, backY, 120, 50);
   
@@ -2004,13 +2102,6 @@ function drawChapterSelect() {
   ctx.font = '24px monospace';
   ctx.textAlign = 'center';
   ctx.fillText('BACK', backX + 60, backY + 32);
-  
-  window.backButton = {
-    x: backX,
-    y: backY,
-    width: 120,
-    height: 50
-  };
 
   // Instructions
   ctx.fillStyle = '#666666';
@@ -2061,9 +2152,18 @@ function drawLevelSelect() {
     const isUnlocked = isLevelUnlocked(currentChapter, i);
     const isCompleted = completedLevels.has(getGlobalLevelIndex(currentChapter, i));
     
+    const levelBtn = {
+      x: bx,
+      y: by,
+      width: 90,
+      height: 90,
+      levelInChapter: i,
+      isUnlocked: isUnlocked
+    };
+    
     // Draw button - darker if locked
     if (isUnlocked) {
-      ctx.fillStyle = '#444444';
+      ctx.fillStyle = isButtonHovered(levelBtn) ? '#555555' : '#444444';
     } else {
       ctx.fillStyle = '#222222'; // Much darker for locked levels
     }
@@ -2071,7 +2171,11 @@ function drawLevelSelect() {
     
     // Border - different color for locked
     if (isUnlocked) {
-      ctx.strokeStyle = isCompleted ? '#44ff44' : '#888888'; // Green border if completed
+      if (isCompleted) {
+        ctx.strokeStyle = '#44ff44'; // Green border if completed
+      } else {
+        ctx.strokeStyle = isButtonHovered(levelBtn) ? '#aaaaaa' : '#888888';
+      }
     } else {
       ctx.strokeStyle = '#444444'; // Dark border for locked
     }
@@ -2111,14 +2215,7 @@ function drawLevelSelect() {
       }
     }
     
-    window.levelButtons.push({
-      x: bx,
-      y: by,
-      width: 90,
-      height: 90,
-      levelInChapter: i,
-      isUnlocked: isUnlocked
-    });
+    window.levelButtons.push(levelBtn);
     x++;
   }
 
@@ -2130,12 +2227,30 @@ function drawLevelSelect() {
     const bonusGlobalIndex = getBonusLevelGlobalIndex(currentChapter);
     const isBonusCompleted = completedLevels.has(bonusGlobalIndex);
     
+    const bonusBtn = {
+      x: bonusX,
+      y: bonusY,
+      width: 90,
+      height: 90,
+      levelInChapter: -1,
+      isUnlocked: true,
+      isBonus: true
+    };
+    
     // Draw bonus button - special gold color
-    ctx.fillStyle = isBonusCompleted ? '#9900ffff' : '#B8860B'; // Gold or dark gold
+    if (isBonusCompleted) {
+      ctx.fillStyle = '#9900ffff';
+    } else {
+      ctx.fillStyle = isButtonHovered(bonusBtn) ? '#DAA520' : '#B8860B'; // Lighter gold on hover
+    }
     ctx.fillRect(bonusX, bonusY, 90, 90);
     
     // Special border for bonus level
-    ctx.strokeStyle = isBonusCompleted ? '#44ff44' : '#FFA500'; // Green if completed, orange if not
+    if (isBonusCompleted) {
+      ctx.strokeStyle = '#44ff44'; // Green if completed
+    } else {
+      ctx.strokeStyle = isButtonHovered(bonusBtn) ? '#FFB84D' : '#FFA500'; // Lighter orange on hover
+    }
     ctx.lineWidth = 4;
     ctx.strokeRect(bonusX, bonusY, 90, 90);
 
@@ -2159,23 +2274,22 @@ function drawLevelSelect() {
       ctx.fillText('Press B', bonusX + 45, bonusY + 65);
     }
     
-    window.levelButtons.push({
-      x: bonusX,
-      y: bonusY,
-      width: 90,
-      height: 90,
-      levelInChapter: -1, // Special marker for bonus level
-      isUnlocked: true,
-      isBonus: true
-    });
+    window.levelButtons.push(bonusBtn);
   }
 
   // Back button
   let backX = 50;
   let backY = canvas.height - 100;
-  ctx.fillStyle = '#444444';
+  window.backButton = {
+    x: backX,
+    y: backY,
+    width: 120,
+    height: 50
+  };
+  
+  ctx.fillStyle = isButtonHovered(window.backButton) ? '#555555' : '#444444';
   ctx.fillRect(backX, backY, 120, 50);
-  ctx.strokeStyle = '#888888';
+  ctx.strokeStyle = isButtonHovered(window.backButton) ? '#aaaaaa' : '#888888';
   ctx.lineWidth = 3;
   ctx.strokeRect(backX, backY, 120, 50);
   
@@ -2183,13 +2297,6 @@ function drawLevelSelect() {
   ctx.font = '24px monospace';
   ctx.textAlign = 'center';
   ctx.fillText('BACK', backX + 60, backY + 32);
-  
-  window.backButton = {
-    x: backX,
-    y: backY,
-    width: 120,
-    height: 50
-  };
 
   // Instructions
   ctx.fillStyle = '#666666';
@@ -2582,6 +2689,15 @@ window.addEventListener('keyup', (e) => {
 
 // Mouse click handler for menu buttons
 canvas.addEventListener('click', handleClick);
+
+// Mouse move handler for hover effects
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  mouseX = (e.clientX - rect.left) * scaleX;
+  mouseY = (e.clientY - rect.top) * scaleY;
+});
 
 // Start the game when page loads
 init();
