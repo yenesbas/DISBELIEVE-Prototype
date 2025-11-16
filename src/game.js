@@ -517,26 +517,26 @@ let completedLevels = new Set(); // Stores global level indices that have been c
 let levelStars = {}; // Stores star ratings (1-3) for each level: { globalLevelIndex: stars }
 
 // Player customization
-let playerColor = '#4488ff'; // Default blue
+let playerColor = '#888888'; // Default gray (boring starter color)
 let playerTrail = 'none'; // 'none', 'fade', 'particles', 'glow'
 let trailHistory = []; // Store recent positions for trail effect
 
 const playerColors = [
-  { name: 'Blue', value: '#4488ff' },
-  { name: 'Red', value: '#ff4444' },
-  { name: 'Green', value: '#44ff44' },
-  { name: 'Purple', value: '#aa44ff' },
-  { name: 'Orange', value: '#ff8844' },
-  { name: 'Cyan', value: '#44ffff' },
-  { name: 'Pink', value: '#ff44aa' },
-  { name: 'Yellow', value: '#ffff44' }
+  { name: 'Gray', value: '#888888', unlockChapter: -1 }, // Always unlocked (starter color)
+  { name: 'Purple', value: '#8c44ff', unlockChapter: 0 }, // Chapter 1 color
+  { name: 'Blue', value: '#44aaff', unlockChapter: 1 }, // Chapter 2 color
+  { name: 'Orange', value: '#ff8844', unlockChapter: 2 }, // Chapter 3 color
+  { name: 'Green', value: '#44ff88', unlockChapter: 3 }, // Chapter 4 color
+  { name: 'Red', value: '#ff4444', unlockChapter: 4 }, // Future chapter
+  { name: 'Cyan', value: '#44ffff', unlockChapter: 5 }, // Future chapter
+  { name: 'Pink', value: '#ff44aa', unlockChapter: 6 } // Future chapter
 ];
 
 const playerTrails = [
-  { name: 'None', value: 'none', description: 'No trail' },
-  { name: 'Fade', value: 'fade', description: 'Fading trail' },
-  { name: 'Particles', value: 'particles', description: 'Particle effect' },
-  { name: 'Glow', value: 'glow', description: 'Glowing aura' }
+  { name: 'None', value: 'none', description: 'No trail', unlockChapter: -1 }, // Always unlocked
+  { name: 'Glow', value: 'glow', description: 'Glowing aura', unlockChapter: 0 }, // Unlock after Chapter 1
+  { name: 'Fade', value: 'fade', description: 'Fading trail', unlockChapter: 1 }, // Unlock after Chapter 2
+  { name: 'Particles', value: 'particles', description: 'Particle effect', unlockChapter: 2 } // Unlock after Chapter 3
 ];
 
 // Star rating thresholds (deaths required for each star)
@@ -585,6 +585,18 @@ function saveProgress() {
   }
 }
 
+function isChapterCompleted(chapterIndex) {
+  if (chapterIndex >= chapters.length) return false;
+  
+  // Check if all 10 regular levels in the chapter are completed
+  for (let i = 0; i < chapters[chapterIndex].levels.length; i++) {
+    const globalIndex = getGlobalLevelIndex(chapterIndex, i);
+    if (!completedLevels.has(globalIndex)) return false;
+  }
+  
+  return true;
+}
+
 function isLevelUnlocked(chapterIndex, levelInChapter) {
   // First level of first chapter is always unlocked
   if (chapterIndex === 0 && levelInChapter === 0) return true;
@@ -600,6 +612,18 @@ function isBonusLevelUnlocked(chapterIndex) {
   // Bonus level unlocks when level 10 of the chapter is completed
   const level10GlobalIndex = getGlobalLevelIndex(chapterIndex, 9); // Level 10 = index 9
   return completedLevels.has(level10GlobalIndex);
+}
+
+// Check if a color is unlocked
+function isColorUnlocked(color) {
+  if (color.unlockChapter === -1) return true; // Always unlocked
+  return isChapterCompleted(color.unlockChapter);
+}
+
+// Check if a trail is unlocked
+function isTrailUnlocked(trail) {
+  if (trail.unlockChapter === -1) return true; // Always unlocked
+  return isChapterCompleted(trail.unlockChapter);
 }
 
 function getBonusLevelGlobalIndex(chapterIndex) {
@@ -1777,28 +1801,41 @@ function drawCustomization() {
   playerColors.forEach((color, index) => {
     const x = colorStartX + index * colorSpacing - colorBoxSize / 2;
     const colorBox = { x: x, y: colorY, width: colorBoxSize, height: colorBoxSize };
+    const isUnlocked = isColorUnlocked(color);
     
-    // Draw color box
-    ctx.fillStyle = color.value;
+    // Draw color box (dimmed if locked)
+    if (isUnlocked) {
+      ctx.fillStyle = color.value;
+    } else {
+      ctx.fillStyle = '#333333'; // Dark gray for locked
+    }
     ctx.fillRect(x, colorY, colorBoxSize, colorBoxSize);
     
-    // Highlight selected or hovered
-    if (playerColor === color.value) {
+    // Highlight selected or hovered (only if unlocked)
+    if (playerColor === color.value && isUnlocked) {
       ctx.strokeStyle = '#ffff44';
       ctx.lineWidth = 4;
       ctx.strokeRect(x - 4, colorY - 4, colorBoxSize + 8, colorBoxSize + 8);
-    } else if (isButtonHovered(colorBox)) {
+    } else if (isButtonHovered(colorBox) && isUnlocked) {
       ctx.strokeStyle = '#aaaaaa';
       ctx.lineWidth = 3;
       ctx.strokeRect(x - 2, colorY - 2, colorBoxSize + 4, colorBoxSize + 4);
     } else {
-      ctx.strokeStyle = '#888888';
+      ctx.strokeStyle = isUnlocked ? '#888888' : '#555555';
       ctx.lineWidth = 2;
       ctx.strokeRect(x, colorY, colorBoxSize, colorBoxSize);
     }
     
-    // Color name
-    ctx.fillStyle = '#aaaaaa';
+    // Lock icon for locked colors
+    if (!isUnlocked) {
+      ctx.fillStyle = '#666666';
+      ctx.font = '32px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('🔒', x + colorBoxSize / 2, colorY + colorBoxSize / 2 + 10);
+    }
+    
+    // Color name (dimmed if locked)
+    ctx.fillStyle = isUnlocked ? '#aaaaaa' : '#555555';
     ctx.font = '16px monospace';
     ctx.fillText(color.name, x + colorBoxSize / 2, colorY + colorBoxSize + 20);
     
@@ -1808,7 +1845,8 @@ function drawCustomization() {
       width: colorBoxSize,
       height: colorBoxSize,
       action: 'color',
-      value: color.value
+      value: color.value,
+      unlocked: isUnlocked
     });
   });
 
@@ -1825,83 +1863,94 @@ function drawCustomization() {
 
   playerTrails.forEach((trail, index) => {
     const x = trailStartX + index * trailSpacing - trailBoxSize / 2;
+    const isUnlocked = isTrailUnlocked(trail);
     
-    // Draw background box
-    ctx.fillStyle = '#333333';
+    // Draw background box (dimmed if locked)
+    ctx.fillStyle = isUnlocked ? '#333333' : '#222222';
     ctx.fillRect(x, trailY, trailBoxSize, trailBoxSize);
     
-    // Draw trail preview
-    ctx.fillStyle = playerColor;
-    const centerX = x + trailBoxSize / 2;
-    const centerY = trailY + trailBoxSize / 2;
-    const boxSize = 25;
-    
-    if (trail.value === 'none') {
-      // Just the player box
-      ctx.fillRect(centerX - boxSize/2, centerY - boxSize/2, boxSize, boxSize);
-    } else if (trail.value === 'fade') {
-      // Fading squares
-      for (let i = 3; i >= 0; i--) {
-        const alpha = (i + 1) * 0.2;
-        const offset = (3 - i) * 8;
+    // Draw trail preview (only if unlocked)
+    if (isUnlocked) {
+      ctx.fillStyle = playerColor;
+      const centerX = x + trailBoxSize / 2;
+      const centerY = trailY + trailBoxSize / 2;
+      const boxSize = 25;
+      
+      if (trail.value === 'none') {
+        // Just the player box
+        ctx.fillRect(centerX - boxSize/2, centerY - boxSize/2, boxSize, boxSize);
+      } else if (trail.value === 'glow') {
+        // Glowing circles
         const trailColor = playerColor.replace('#', '');
         const r = parseInt(trailColor.substr(0, 2), 16);
         const g = parseInt(trailColor.substr(2, 2), 16);
         const b = parseInt(trailColor.substr(4, 2), 16);
-        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-        ctx.fillRect(centerX - boxSize/2 - offset, centerY - boxSize/2, boxSize, boxSize);
+        
+        for (let i = 3; i > 0; i--) {
+          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.15 - i * 0.03})`;
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, boxSize/2 + i * 6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        // Main box
+        ctx.fillStyle = playerColor;
+        ctx.fillRect(centerX - boxSize/2, centerY - boxSize/2, boxSize, boxSize);
+      } else if (trail.value === 'fade') {
+        // Fading squares
+        for (let i = 3; i >= 0; i--) {
+          const alpha = (i + 1) * 0.2;
+          const offset = (3 - i) * 8;
+          const trailColor = playerColor.replace('#', '');
+          const r = parseInt(trailColor.substr(0, 2), 16);
+          const g = parseInt(trailColor.substr(2, 2), 16);
+          const b = parseInt(trailColor.substr(4, 2), 16);
+          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+          ctx.fillRect(centerX - boxSize/2 - offset, centerY - boxSize/2, boxSize, boxSize);
+        }
+      } else if (trail.value === 'particles') {
+        // Main box
+        ctx.fillRect(centerX - boxSize/2, centerY - boxSize/2, boxSize, boxSize);
+        // Particle dots
+        const trailColor = playerColor.replace('#', '');
+        const r = parseInt(trailColor.substr(0, 2), 16);
+        const g = parseInt(trailColor.substr(2, 2), 16);
+        const b = parseInt(trailColor.substr(4, 2), 16);
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.6)`;
+        for (let i = 0; i < 8; i++) {
+          const particleX = centerX - 35 + Math.random() * 40;
+          const particleY = centerY - 10 + Math.random() * 20;
+          ctx.fillRect(particleX, particleY, 4, 4);
+        }
       }
-    } else if (trail.value === 'particles') {
-      // Main box
-      ctx.fillRect(centerX - boxSize/2, centerY - boxSize/2, boxSize, boxSize);
-      // Particle dots
-      const trailColor = playerColor.replace('#', '');
-      const r = parseInt(trailColor.substr(0, 2), 16);
-      const g = parseInt(trailColor.substr(2, 2), 16);
-      const b = parseInt(trailColor.substr(4, 2), 16);
-      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.6)`;
-      for (let i = 0; i < 8; i++) {
-        const particleX = centerX - 35 + Math.random() * 40;
-        const particleY = centerY - 10 + Math.random() * 20;
-        ctx.fillRect(particleX, particleY, 4, 4);
-      }
-    } else if (trail.value === 'glow') {
-      // Glowing circles
-      const trailColor = playerColor.replace('#', '');
-      const r = parseInt(trailColor.substr(0, 2), 16);
-      const g = parseInt(trailColor.substr(2, 2), 16);
-      const b = parseInt(trailColor.substr(4, 2), 16);
-      
-      for (let i = 3; i > 0; i--) {
-        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.15 - i * 0.03})`;
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, boxSize/2 + i * 6, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      // Main box
-      ctx.fillStyle = playerColor;
-      ctx.fillRect(centerX - boxSize/2, centerY - boxSize/2, boxSize, boxSize);
+    }
+    
+    // Lock icon for locked trails
+    if (!isUnlocked) {
+      ctx.fillStyle = '#555555';
+      ctx.font = '48px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('🔒', x + trailBoxSize / 2, trailY + trailBoxSize / 2 + 15);
     }
     
     const trailBox = { x: x, y: trailY, width: trailBoxSize, height: trailBoxSize };
     
-    // Highlight selected or hovered
-    if (playerTrail === trail.value) {
+    // Highlight selected or hovered (only if unlocked)
+    if (playerTrail === trail.value && isUnlocked) {
       ctx.strokeStyle = '#ffff44';
       ctx.lineWidth = 4;
       ctx.strokeRect(x - 4, trailY - 4, trailBoxSize + 8, trailBoxSize + 8);
-    } else if (isButtonHovered(trailBox)) {
+    } else if (isButtonHovered(trailBox) && isUnlocked) {
       ctx.strokeStyle = '#aaaaaa';
       ctx.lineWidth = 3;
       ctx.strokeRect(x - 2, trailY - 2, trailBoxSize + 4, trailBoxSize + 4);
     } else {
-      ctx.strokeStyle = '#888888';
+      ctx.strokeStyle = isUnlocked ? '#888888' : '#555555';
       ctx.lineWidth = 2;
       ctx.strokeRect(x, trailY, trailBoxSize, trailBoxSize);
     }
     
-    // Trail name
-    ctx.fillStyle = '#aaaaaa';
+    // Trail name (dimmed if locked)
+    ctx.fillStyle = isUnlocked ? '#aaaaaa' : '#555555';
     ctx.font = '18px monospace';
     ctx.fillText(trail.name, x + trailBoxSize / 2, trailY + trailBoxSize + 20);
     
@@ -1911,7 +1960,8 @@ function drawCustomization() {
       width: trailBoxSize,
       height: trailBoxSize,
       action: 'trail',
-      value: trail.value
+      value: trail.value,
+      unlocked: isUnlocked
     });
   });
 
@@ -2216,7 +2266,7 @@ function drawLevelSelect() {
     if (!isUnlocked) {
       ctx.fillStyle = '#555555';
       ctx.font = '32px monospace';
-      ctx.fillText('🔒', canvas.width / 2 - 263 + x * 120, y + 23);
+      ctx.fillText('🔒', canvas.width / 2 - 255 + x * 120, y + 23);
     } else if (isCompleted) {
       // Show star rating for completed levels
       const globalIndex = getGlobalLevelIndex(currentChapter, i);
@@ -2228,7 +2278,7 @@ function drawLevelSelect() {
     } else {
       // Button hint for unlocked but not completed levels
       ctx.fillStyle = '#888888';
-      ctx.font = '22px monospace';
+      ctx.font = '18px monospace';
       if (i < 9) {
         ctx.fillText(`Press ${i + 1}`, canvas.width / 2 - 255 + x * 120, y + 23);
       } else {
@@ -2504,6 +2554,9 @@ function handleClick(event) {
     window.customizeButtons.forEach(button => {
       if (x >= button.x && x <= button.x + button.width &&
           y >= button.y && y <= button.y + button.height) {
+        // Only allow selection if unlocked
+        if (button.unlocked === false) return;
+        
         if (button.action === 'color') {
           playerColor = button.value;
           saveProgress();
