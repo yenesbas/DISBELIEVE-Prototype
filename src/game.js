@@ -134,6 +134,8 @@ function setupAudioControls() {
 // '3' = spike that moves 3 tiles when triggered
 // '4' = spike that moves 4 tiles when triggered
 // '^' = spike that moves 2 tiles (same as '2', for backward compatibility)
+// 'G' = gravity zone (top-left corner marker)
+// 'g' = gravity zone continuation (for multi-tile zones)
 //
 // HOW TO BUILD LEVELS:
 // - Place spikes using numbers 1-4 based on how far you want them to move
@@ -347,6 +349,34 @@ const chapters = [
   {
     name: "Chapter 2: Advanced Illusions",
     description: "Master the art of disbelief",
+    // Gravity zone configuration for all levels in this chapter
+    gravityZones: [
+      {
+        // Position auto-calculated from 'G' marker during parseLevel()
+        type: 'flip',
+        trigger: 'enter',
+        duration: null,
+        cooldown: 1.0,
+        oneShot: false,
+        initialActive: false,
+        visual: {
+          color: '#44ddff',
+          secondaryColor: '#ff44dd',
+          alpha: 0.35,
+          stripeAngle: 45,
+          stripeWidth: 8,
+          stripeSpacing: 20,
+          animated: true,
+          animSpeed: 40,
+          showArrow: true,
+          glowWhenActive: true
+        },
+        sound: {
+          enter: 'gravity_flip',
+          exit: 'gravity_restore'
+        }
+      }
+    ],
     levels: [
       {
         name: "Level 1: First Steps Into Nothing",
@@ -368,6 +398,23 @@ const chapters = [
       },
       {
         name: "Level 2: The Invisible Maze",
+        map: [
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          ".S...............D..",
+          "####..##..###..#####",
+          "....00..00..........",
+          "....##..##.........."
+        ]
+      },
+      {
+        name: "Level 3: Gravity Test",
         map: [
           "....................",
           "....................",
@@ -496,10 +543,12 @@ let platforms = [];
 let fakeBlocks = []; // Blocks that look solid but player passes through
 let invisiblePlatforms = []; // Platforms that are solid but completely invisible
 let spikes = [];
+let gravityZones = []; // Areas that flip or modify gravity
 let door = null;
 let spawnPoint = null; // Custom spawn point set by 'S' in level map
 let deaths = 0;
 let levelDeaths = 0;
+let levelTime = 0; // Time spent in current level (in seconds)
 let isDead = false;
 let deathFlashTimer = 0;
 let levelCompleteTimer = 0;
@@ -585,6 +634,16 @@ function saveProgress() {
   }
 }
 
+function resetProgress() {
+  completedLevels = new Set();
+  levelStars = {};
+  playerColor = '#888888'; // Reset to default gray
+  playerTrail = 'none';
+  deaths = 0;
+  localStorage.removeItem('disbelieveProgress');
+  console.log('Progress has been reset!');
+}
+
 function isChapterCompleted(chapterIndex) {
   if (chapterIndex >= chapters.length) return false;
   
@@ -658,6 +717,25 @@ function transitionToState(newState) {
   pendingGameState = newState;
   transitionState = 'fadeOut';
   transitionAlpha = 0;
+  selectedButtonIndex = 0; // Reset button selection when transitioning
+}
+
+// Get current active buttons based on game state
+function getCurrentButtons() {
+  let buttons = [];
+  if (gameState === 'menu') buttons = window.menuButtons || [];
+  else if (gameState === 'chapterSelect') buttons = window.chapterButtons || [];
+  else if (gameState === 'levelSelect') buttons = window.levelButtons ? window.levelButtons.filter(b => b.isUnlocked !== false) : [];
+  else if (gameState === 'customize') buttons = window.customizeButtons ? window.customizeButtons.filter(b => b.unlocked !== false && b.action !== 'back') : [];
+  else if (gameState === 'paused') buttons = window.pauseButtons || [];
+  else if (gameState === 'settings') buttons = window.settingsButtons || [];
+  
+  // Add buttonIndex to each button for keyboard navigation
+  buttons.forEach((btn, idx) => {
+    btn.buttonIndex = idx;
+  });
+  
+  return buttons;
 }
 
 // MASTER DEBUG SWITCH - Set to false to disable ALL debug features
@@ -665,6 +743,9 @@ const ENABLE_DEBUG_FEATURES = true;
 
 // DEBUG MODE - Only works if ENABLE_DEBUG_FEATURES is true
 let DEBUG_MODE = false;
+
+// GRAVITY ZONES FEATURE - Set to true to enable gravity flip zones
+const ENABLE_GRAVITY_ZONES = true;
 
 // Input handling
 const keys = {
@@ -677,6 +758,9 @@ const keys = {
 // Mouse position tracking for hover effects
 let mouseX = 0;
 let mouseY = 0;
+
+// Keyboard navigation
+let selectedButtonIndex = 0; // Index of currently selected button for keyboard navigation
 
 // Track document visibility
 let isVisible = true;
@@ -747,6 +831,7 @@ function loadLevelFromChapter(chapterIndex, levelInChapter) {
   currentLevelInChapter = levelInChapter;
   currentLevel = getGlobalLevelIndex(chapterIndex, levelInChapter);
   levelDeaths = 0;
+  levelTime = 0;
   parseLevel();
   resetPlayer();
   gameState = 'playing';
@@ -758,6 +843,7 @@ function loadLevel(globalLevelIndex) {
   currentChapter = getChapterFromGlobalLevel(globalLevelIndex);
   currentLevelInChapter = getLevelInChapterFromGlobalLevel(globalLevelIndex);
   levelDeaths = 0;
+  levelTime = 0;
   parseLevel();
   resetPlayer();
   gameState = 'playing';
@@ -862,6 +948,110 @@ function parseLevel() {
       }
     }
   }
+  
+  // Parse gravity zones if feature is enabled
+  if (ENABLE_GRAVITY_ZONES) {
+    gravityZones = [];
+    const levelData = levels[currentLevel];
+    const chapterData = chapters[currentChapter];
+    
+    // First, detect 'G' and 'g' markers in the map to find zone boundaries
+    const zoneMarkers = [];
+    for (let row = 0; row < levelMap.length; row++) {
+      for (let col = 0; col < levelMap[row].length; col++) {
+        const char = levelMap[row][col];
+        if (char === 'G' || char === 'g') {
+          zoneMarkers.push({ row, col, char });
+        }
+      }
+    }
+    
+    // Group connected markers into zones
+    const processedPositions = new Set();
+    const detectedZones = [];
+    
+    zoneMarkers.forEach(marker => {
+      const key = `${marker.row},${marker.col}`;
+      if (processedPositions.has(key)) return;
+      
+      // Find all connected 'G' and 'g' markers (flood fill)
+      const zone = { minRow: marker.row, maxRow: marker.row, minCol: marker.col, maxCol: marker.col };
+      const stack = [marker];
+      
+      while (stack.length > 0) {
+        const current = stack.pop();
+        const currentKey = `${current.row},${current.col}`;
+        
+        if (processedPositions.has(currentKey)) continue;
+        processedPositions.add(currentKey);
+        
+        zone.minRow = Math.min(zone.minRow, current.row);
+        zone.maxRow = Math.max(zone.maxRow, current.row);
+        zone.minCol = Math.min(zone.minCol, current.col);
+        zone.maxCol = Math.max(zone.maxCol, current.col);
+        
+        // Check adjacent cells
+        [[0, 1], [0, -1], [1, 0], [-1, 0]].forEach(([dr, dc]) => {
+          const newRow = current.row + dr;
+          const newCol = current.col + dc;
+          if (newRow >= 0 && newRow < levelMap.length && 
+              newCol >= 0 && newCol < levelMap[newRow].length) {
+            const char = levelMap[newRow][newCol];
+            if ((char === 'G' || char === 'g') && !processedPositions.has(`${newRow},${newCol}`)) {
+              stack.push({ row: newRow, col: newCol, char });
+            }
+          }
+        });
+      }
+      
+      detectedZones.push(zone);
+    });
+    
+    // Convert detected zones to gravity zone objects
+    detectedZones.forEach((zone, index) => {
+      // Check chapter config first, then level config
+      const zoneConfig = (chapterData.gravityZones && chapterData.gravityZones[index]) || 
+                        (levelData.gravityZones && levelData.gravityZones[index]) || {};
+      
+      // Calculate pixel coordinates
+      const x = zone.minCol * TILE_SIZE;
+      const y = zone.minRow * TILE_SIZE;
+      const width = (zone.maxCol - zone.minCol + 1) * TILE_SIZE;
+      const height = (zone.maxRow - zone.minRow + 1) * TILE_SIZE;
+      
+      // Merge detected position with config
+      gravityZones.push({
+        id: index,
+        x: x,
+        y: y,
+        width: width,
+        height: height,
+        type: zoneConfig.type || 'flip',
+        trigger: zoneConfig.trigger || 'enter',
+        duration: zoneConfig.duration !== undefined ? zoneConfig.duration : null,
+        cooldown: zoneConfig.cooldown !== undefined ? zoneConfig.cooldown : 0.5,
+        oneShot: zoneConfig.oneShot || false,
+        initialActive: zoneConfig.initialActive || false,
+        hasActivated: false, // Runtime state
+        visual: {
+          color: zoneConfig.visual?.color || '#44ddff',
+          secondaryColor: zoneConfig.visual?.secondaryColor || '#ff44dd',
+          alpha: zoneConfig.visual?.alpha !== undefined ? zoneConfig.visual.alpha : 0.35,
+          stripeAngle: zoneConfig.visual?.stripeAngle || 45,
+          stripeWidth: zoneConfig.visual?.stripeWidth || 8,
+          stripeSpacing: zoneConfig.visual?.stripeSpacing || 20,
+          animated: zoneConfig.visual?.animated !== undefined ? zoneConfig.visual.animated : true,
+          animSpeed: zoneConfig.visual?.animSpeed || 40,
+          showArrow: zoneConfig.visual?.showArrow !== undefined ? zoneConfig.visual.showArrow : true,
+          glowWhenActive: zoneConfig.visual?.glowWhenActive !== undefined ? zoneConfig.visual.glowWhenActive : true
+        },
+        sound: {
+          enter: zoneConfig.sound?.enter || 'gravity_flip',
+          exit: zoneConfig.sound?.exit || 'gravity_restore'
+        }
+      });
+    });
+  }
 }
 
 // Reset player to starting position
@@ -878,7 +1068,20 @@ function resetPlayer() {
     vx: 0,
     vy: 0,
     onGround: false,
-    hasJumped: false
+    hasJumped: false,
+    
+    // Gravity system
+    gravityScale: 1,              // 1 = normal, -1 = inverted
+    currentGravityZone: new Set(), // Set of active zone IDs (supports overlapping zones)
+    gravityFlipTimer: 0,          // Time remaining for temporary gravity flip
+    gravityFlipCooldown: 0,       // Cooldown timer for zone reactivation
+    gravityLocked: false,         // If true, gravity cannot be changed
+    lastGravityZone: null,        // Last zone entered (for cooldown tracking)
+    hasBeenFlipped: false,        // Track if player experienced gravity flip (for tutorial)
+    
+    // Visual feedback
+    gravityFlipParticles: [],     // Particle effects during flip
+    gravityIndicatorAlpha: 0      // UI indicator fade
   };
 
   // Reset all spikes
@@ -988,6 +1191,42 @@ function update(deltaTime) {
     return; // Skip update if game is paused due to window blur
   }
 
+  // Update level time (only when not dead)
+  if (!isDead) {
+    levelTime += deltaTime;
+  }
+  
+  // Update gravity system timers
+  if (ENABLE_GRAVITY_ZONES) {
+    // Timer for temporary gravity flips
+    if (player.gravityFlipTimer > 0) {
+      player.gravityFlipTimer -= deltaTime;
+      if (player.gravityFlipTimer <= 0) {
+        player.gravityScale = 1; // Reset to normal
+        player.gravityIndicatorAlpha = 1.0;
+        // playSound('gravity_restore'); // Uncomment when sound file exists
+      }
+    }
+    
+    // Cooldown timer
+    if (player.gravityFlipCooldown > 0) {
+      player.gravityFlipCooldown -= deltaTime;
+    }
+    
+    // Fade UI indicator
+    if (player.gravityIndicatorAlpha > 0) {
+      player.gravityIndicatorAlpha -= deltaTime * 2;
+    }
+    
+    // Update gravity particles
+    player.gravityFlipParticles = player.gravityFlipParticles.filter(p => {
+      p.x += p.vx * deltaTime;
+      p.y += p.vy * deltaTime;
+      p.life -= deltaTime * 2;
+      return p.life > 0;
+    });
+  }
+
   // Horizontal movement
   if (keys.left) {
     player.vx = -MOVE_SPEED;
@@ -999,7 +1238,11 @@ function update(deltaTime) {
 
   // Jumping
   if (keys.space && player.onGround && !player.hasJumped) {
-    player.vy = JUMP_FORCE;
+    // Jump force inverts based on gravity direction
+    // JUMP_FORCE is negative (-1050), so multiply by gravityScale:
+    // Normal gravity (scale=1): -1050 * 1 = -1050 (upward)
+    // Inverted gravity (scale=-1): -1050 * -1 = +1050 (downward in inverted world)
+    player.vy = JUMP_FORCE * player.gravityScale;
     player.onGround = false;
     player.hasJumped = true;
     playSound('jump'); // Play jump sound
@@ -1015,8 +1258,9 @@ function update(deltaTime) {
     loadLevel(currentLevel);
   }
 
-  // Apply gravity (scaled by deltaTime)
-  player.vy += GRAVITY * deltaTime;
+  // Apply gravity (scaled by deltaTime and gravity direction)
+  const effectiveGravity = GRAVITY * player.gravityScale;
+  player.vy += effectiveGravity * deltaTime;
 
   // Update horizontal position first (scaled by deltaTime)
   player.x += player.vx * deltaTime;
@@ -1061,16 +1305,30 @@ function update(deltaTime) {
 
   platforms.forEach(platform => {
     if (checkCollision(player, platform)) {
-      // Check if player is falling onto platform (landing on top)
-      if (player.vy > 0) {
-        player.y = platform.y - player.height;
-        player.vy = 0;
-        player.onGround = true;
-      }
-      // Check if player hit platform from below (hitting ceiling)
-      else if (player.vy < 0) {
-        player.y = platform.y + platform.height;
-        player.vy = 0;
+      if (player.gravityScale > 0) {
+        // Normal gravity: check if player is falling onto platform (landing on top)
+        if (player.vy > 0) {
+          player.y = platform.y - player.height;
+          player.vy = 0;
+          player.onGround = true;
+        }
+        // Check if player hit platform from below (hitting ceiling)
+        else if (player.vy < 0) {
+          player.y = platform.y + platform.height;
+          player.vy = 0;
+        }
+      } else {
+        // Inverted gravity: ceiling becomes floor
+        if (player.vy < 0) {
+          player.y = platform.y + platform.height;
+          player.vy = 0;
+          player.onGround = true;
+        }
+        // Check if player hit from "above" (hitting floor in inverted gravity)
+        else if (player.vy > 0) {
+          player.y = platform.y - player.height;
+          player.vy = 0;
+        }
       }
     }
   });
@@ -1078,22 +1336,41 @@ function update(deltaTime) {
   // Invisible platform vertical collision check
   invisiblePlatforms.forEach(platform => {
     if (checkCollision(player, platform)) {
-      // Check if player is falling onto platform (landing on top)
-      if (player.vy > 0) {
-        player.y = platform.y - player.height;
-        player.vy = 0;
-        player.onGround = true;
-      }
-      // Check if player hit platform from below (hitting ceiling)
-      else if (player.vy < 0) {
-        player.y = platform.y + platform.height;
-        player.vy = 0;
+      if (player.gravityScale > 0) {
+        // Normal gravity: check if player is falling onto platform (landing on top)
+        if (player.vy > 0) {
+          player.y = platform.y - player.height;
+          player.vy = 0;
+          player.onGround = true;
+        }
+        // Check if player hit platform from below (hitting ceiling)
+        else if (player.vy < 0) {
+          player.y = platform.y + platform.height;
+          player.vy = 0;
+        }
+      } else {
+        // Inverted gravity: ceiling becomes floor
+        if (player.vy < 0) {
+          player.y = platform.y + platform.height;
+          player.vy = 0;
+          player.onGround = true;
+        }
+        // Check if player hit from "above" (hitting floor in inverted gravity)
+        else if (player.vy > 0) {
+          player.y = platform.y - player.height;
+          player.vy = 0;
+        }
       }
     }
   });
 
   // Check spike triggers (position-based)
   checkSpikeTriggers();
+  
+  // Check gravity zones
+  if (ENABLE_GRAVITY_ZONES) {
+    checkGravityZones(deltaTime);
+  }
 
   // Update moving spikes
   spikes.forEach(spike => {
@@ -1187,6 +1464,109 @@ function checkSpikeTriggers() {
       }
     }
   });
+}
+
+// Check if player is in a gravity zone and activate it
+function checkGravityZones(deltaTime) {
+  gravityZones.forEach(zone => {
+    const isInZone = checkCollision(player, zone);
+    const wasInZone = player.currentGravityZone.has(zone.id);
+    
+    // Initialize zone cooldown if not exists
+    if (!zone.cooldownTimer) zone.cooldownTimer = 0;
+    
+    // Update per-zone cooldown
+    if (zone.cooldownTimer > 0) {
+      zone.cooldownTimer -= deltaTime;
+    }
+    
+    if (isInZone && !wasInZone) {
+      // Player just entered zone
+      player.currentGravityZone.add(zone.id);
+      if (zone.trigger === 'enter' && zone.cooldownTimer <= 0 && !player.gravityLocked) {
+        activateGravityZone(zone);
+      }
+    } else if (!isInZone && wasInZone) {
+      // Player just exited zone
+      player.currentGravityZone.delete(zone.id);
+      if (zone.type === 'momentary') {
+        deactivateGravityZone(zone);
+      }
+    }
+    
+    // Contact trigger activates continuously while inside
+    if (isInZone && zone.trigger === 'contact' && zone.cooldownTimer <= 0 && !player.gravityLocked) {
+      activateGravityZone(zone);
+    }
+  });
+}
+
+// Activate a gravity zone
+function activateGravityZone(zone) {
+  // Check one-shot
+  if (zone.oneShot && zone.hasActivated) return;
+  
+  // Check per-zone cooldown (no longer global)
+  if (zone.cooldownTimer > 0) return;
+  
+  // Apply gravity change
+  const oldGravity = player.gravityScale;
+  
+  switch (zone.type) {
+    case 'flip':
+      player.gravityScale *= -1;
+      break;
+    case 'toggle':
+      player.gravityScale *= -1;
+      break;
+    case 'momentary':
+      player.gravityScale = -1;
+      break;
+  }
+  
+  // Only trigger effects if gravity actually changed
+  if (oldGravity !== player.gravityScale) {
+    // Set duration timer if specified
+    if (zone.duration) {
+      player.gravityFlipTimer = zone.duration;
+    }
+    
+    // Set per-zone cooldown (prevents rapid re-triggering of THIS zone)
+    zone.cooldownTimer = zone.cooldown || 1.0;
+    zone.hasActivated = true;
+    player.hasBeenFlipped = true;
+    
+    // Trigger effects
+    // playSound(zone.sound.enter); // Uncomment when sound file exists
+    spawnGravityFlipParticles(player.x, player.y);
+    player.gravityIndicatorAlpha = 1.0; // Show UI indicator
+    
+    // Dampen momentum to prevent instant death on flip
+    player.vy *= 0.5;
+  }
+}
+
+// Deactivate a gravity zone (for momentary zones)
+function deactivateGravityZone(zone) {
+  if (player.gravityScale !== 1) {
+    player.gravityScale = 1; // Restore normal gravity
+    // playSound(zone.sound.exit); // Uncomment when sound file exists
+    player.gravityIndicatorAlpha = 1.0;
+  }
+}
+
+// Spawn particle effects for gravity flip
+function spawnGravityFlipParticles(x, y) {
+  for (let i = 0; i < 20; i++) {
+    player.gravityFlipParticles.push({
+      x: x + player.width / 2,
+      y: y + player.height / 2,
+      vx: (Math.random() - 0.5) * 200,
+      vy: (Math.random() - 0.5) * 200,
+      life: 1.0,
+      color: player.gravityScale < 0 ? '#44ddff' : '#ff44dd'
+    });
+  }
 }
 
 // Check collision between two rectangles
@@ -1322,6 +1702,97 @@ function render() {
     ctx.strokeRect(fakeBlock.x, fakeBlock.y, fakeBlock.width, fakeBlock.height);
   });
 
+  // Draw gravity zones
+  if (ENABLE_GRAVITY_ZONES) {
+    gravityZones.forEach(zone => {
+      const isActive = player && player.currentGravityZone === zone.id;
+      const visual = zone.visual;
+      
+      // Background with gradient
+      const gradient = ctx.createLinearGradient(
+        zone.x, zone.y,
+        zone.x + zone.width, zone.y + zone.height
+      );
+      gradient.addColorStop(0, visual.color);
+      gradient.addColorStop(1, visual.secondaryColor);
+      
+      ctx.globalAlpha = visual.alpha;
+      ctx.fillStyle = gradient;
+      ctx.fillRect(zone.x, zone.y, zone.width, zone.height);
+      ctx.globalAlpha = 1.0;
+      
+      // Diagonal stripes
+      ctx.save();
+      
+      // IMPORTANT: Clip to zone boundaries to prevent stripes extending beyond the box
+      ctx.beginPath();
+      ctx.rect(zone.x, zone.y, zone.width, zone.height);
+      ctx.clip();
+      
+      ctx.strokeStyle = visual.secondaryColor;
+      ctx.lineWidth = visual.stripeWidth;
+      ctx.globalAlpha = visual.alpha * 0.6;
+      
+      const offset = visual.animated ? (Date.now() / 1000 * visual.animSpeed) % visual.stripeSpacing : 0;
+      
+      for (let i = -zone.height; i < zone.width + zone.height; i += visual.stripeSpacing) {
+        ctx.beginPath();
+        const x1 = zone.x + i + offset;
+        const y1 = zone.y;
+        const x2 = zone.x + i - zone.height + offset;
+        const y2 = zone.y + zone.height;
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+      
+      ctx.restore();
+      
+      // Border (glows when active)
+      if (visual.glowWhenActive && isActive) {
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 3;
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = visual.color;
+      } else {
+        ctx.strokeStyle = visual.color;
+        ctx.lineWidth = 2;
+      }
+      ctx.strokeRect(zone.x, zone.y, zone.width, zone.height);
+      ctx.shadowBlur = 0;
+      
+      // Gravity direction arrow
+      if (visual.showArrow) {
+        const centerX = zone.x + zone.width / 2;
+        const centerY = zone.y + zone.height / 2;
+        const arrowSize = Math.min(zone.width, zone.height) * 0.2;
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.globalAlpha = 0.8;
+        
+        // Arrow points in opposite direction of current gravity (shows what will happen)
+        const direction = (player && player.gravityScale > 0) ? -1 : 1;
+        
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY + arrowSize * direction);
+        ctx.lineTo(centerX - arrowSize / 2, centerY - arrowSize * direction);
+        ctx.lineTo(centerX + arrowSize / 2, centerY - arrowSize * direction);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.globalAlpha = 1.0;
+      }
+      
+      // Debug info
+      if (DEBUG_MODE) {
+        ctx.fillStyle = '#ffff00';
+        ctx.font = '12px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText(`Zone ${zone.id} (${zone.type})`, zone.x + 5, zone.y + 15);
+      }
+    });
+  }
+
   // Draw door (green rectangle with yellow outline)
   if (door) {
     ctx.fillStyle = '#44ff44';
@@ -1408,6 +1879,30 @@ function render() {
   if (!isDead && (gameState === 'playing' || gameState === 'paused')) {
     drawPlayer(player.x, player.y, player.width, player.height);
   }
+  
+  // Draw gravity flip particles
+  if (ENABLE_GRAVITY_ZONES && player) {
+    player.gravityFlipParticles.forEach(p => {
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - 3, p.y - 3, 6, 6);
+    });
+    ctx.globalAlpha = 1.0;
+    
+    // Draw gravity indicator UI
+    if (player.gravityIndicatorAlpha > 0 && gameState === 'playing') {
+      const text = player.gravityScale < 0 ? 'GRAVITY INVERTED' : 'GRAVITY NORMAL';
+      const color = player.gravityScale < 0 ? '#ff4444' : '#44ff44';
+      
+      ctx.save();
+      ctx.globalAlpha = player.gravityIndicatorAlpha;
+      ctx.fillStyle = color;
+      ctx.font = 'bold 24px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(text, canvas.width / 2, 50);
+      ctx.restore();
+    }
+  }
 
   // Death flash
   if (isDead && deathFlashTimer > 0 && gameState === 'playing') {
@@ -1422,33 +1917,98 @@ function render() {
 
   // Level complete overlay
   if (gameState === 'levelComplete') {
+    // Semi-transparent green overlay
     ctx.fillStyle = 'rgba(0, 255, 0, 0.3)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    // Main celebration box
+    const boxWidth = 500;
+    const boxHeight = 380;
+    const boxX = canvas.width / 2 - boxWidth / 2;
+    const boxY = canvas.height / 2 - boxHeight / 2;
+    
+    // Box background
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+    
+    // Box border
+    ctx.strokeStyle = '#44ff44';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+
+    // Title
     ctx.fillStyle = '#44ff44';
     ctx.font = 'bold 48px Impact, monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('Level Complete!', canvas.width / 2, canvas.height / 2 - 60);
+    ctx.fillText('LEVEL COMPLETE!', canvas.width / 2, boxY + 60);
     
-    // Show star rating
+    // Star rating with animation effect
     const stars = calculateStars(levelDeaths);
     const starDisplay = '★'.repeat(stars) + '☆'.repeat(3 - stars);
     ctx.fillStyle = '#ffdd44';
     ctx.font = 'bold 64px monospace';
-    ctx.fillText(starDisplay, canvas.width / 2, canvas.height / 2 + 10);
+    ctx.fillText(starDisplay, canvas.width / 2, boxY + 140);
     
-    // Show death count
+    // Stats section
     ctx.fillStyle = '#ffffff';
-    ctx.font = '24px monospace';
-    ctx.fillText(`Deaths this level: ${levelDeaths}`, canvas.width / 2, canvas.height / 2 + 60);
-
-    ctx.font = '24px monospace';
+    ctx.font = '20px Arial, sans-serif';
+    ctx.textAlign = 'left';
+    
+    const statsX = boxX + 80;
+    let statsY = boxY + 200;
+    
+    // Time
+    ctx.fillStyle = '#88ddff';
+    ctx.fillText('Time:', statsX, statsY);
     ctx.fillStyle = '#ffffff';
-    if (currentLevel < levels.length - 1) {
-      ctx.fillText('Next level loading...', canvas.width / 2, canvas.height / 2 + 100);
+    ctx.textAlign = 'right';
+    ctx.fillText(`${Math.floor(levelTime / 60)}:${(Math.floor(levelTime % 60)).toString().padStart(2, '0')}`, boxX + boxWidth - 80, statsY);
+    
+    // Deaths
+    statsY += 40;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#ff8888';
+    ctx.fillText('Deaths:', statsX, statsY);
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'right';
+    ctx.fillText(`${levelDeaths}`, boxX + boxWidth - 80, statsY);
+    
+    // Star rating text
+    statsY += 40;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#ffdd44';
+    ctx.fillText('Rating:', statsX, statsY);
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'right';
+    ctx.fillText(`${stars} / 3 Stars`, boxX + boxWidth - 80, statsY);
+    
+    // Motivational message based on performance
+    ctx.textAlign = 'center';
+    ctx.font = '18px Arial, sans-serif';
+    statsY += 50;
+    
+    if (stars === 3) {
+      ctx.fillStyle = '#44ff44';
+      ctx.fillText('PERFECT! No deaths!', canvas.width / 2, statsY);
+    } else if (stars === 2) {
+      ctx.fillStyle = '#ffff44';
+      ctx.fillText('Great job! Keep improving!', canvas.width / 2, statsY);
+    } else if (stars === 1) {
+      ctx.fillStyle = '#ff8844';
+      ctx.fillText('Good effort! Try again for more stars!', canvas.width / 2, statsY);
     } else {
-      ctx.fillText('You beat all levels!', canvas.width / 2, canvas.height / 2 + 100);
-      ctx.fillText(`Total Deaths: ${deaths}`, canvas.width / 2, canvas.height / 2 + 135);
+      ctx.fillStyle = '#ff4444';
+      ctx.fillText('Keep practicing! You can do better!', canvas.width / 2, statsY);
+    }
+
+    // Next level message
+    ctx.font = '20px Arial, sans-serif';
+    ctx.fillStyle = '#aaaaaa';
+    if (currentLevel < levels.length - 1) {
+      ctx.fillText('Next level loading...', canvas.width / 2, boxY + boxHeight - 30);
+    } else {
+      ctx.fillText('You beat all levels!', canvas.width / 2, boxY + boxHeight - 50);
+      ctx.fillText(`Total Deaths: ${deaths}`, canvas.width / 2, boxY + boxHeight - 25);
     }
     ctx.textAlign = 'left';
   }
@@ -1501,8 +2061,10 @@ function drawPauseMenu() {
     y: buttonY,
     width: buttonWidth,
     height: buttonHeight,
-    action: 'resume'
+    action: 'resume',
+    buttonIndex: 0
   };
+  window.pauseButtons.push(resumeButton);
   
   ctx.fillStyle = isButtonHovered(resumeButton) ? '#555555' : '#444444';
   ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
@@ -1513,8 +2075,6 @@ function drawPauseMenu() {
   ctx.font = 'bold 36px Impact, monospace';
   ctx.textAlign = 'center';
   ctx.fillText('RESUME', canvas.width / 2, buttonY + 40);
-  
-  window.pauseButtons.push(resumeButton);
 
   // Restart button
   buttonY += buttonSpacing;
@@ -1523,8 +2083,10 @@ function drawPauseMenu() {
     y: buttonY,
     width: buttonWidth,
     height: buttonHeight,
+    buttonIndex: 1,
     action: 'restart'
   };
+  window.pauseButtons.push(restartButton);
   
   ctx.fillStyle = isButtonHovered(restartButton) ? '#555555' : '#444444';
   ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
@@ -1534,8 +2096,6 @@ function drawPauseMenu() {
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 36px Impact, monospace';
   ctx.fillText('RESTART', canvas.width / 2, buttonY + 40);
-  
-  window.pauseButtons.push(restartButton);
 
   // Settings button
   buttonY += buttonSpacing;
@@ -1544,8 +2104,10 @@ function drawPauseMenu() {
     y: buttonY,
     width: buttonWidth,
     height: buttonHeight,
+    buttonIndex: 2,
     action: 'settings'
   };
+  window.pauseButtons.push(settingsButton);
   
   ctx.fillStyle = isButtonHovered(settingsButton) ? '#555555' : '#444444';
   ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
@@ -1555,8 +2117,6 @@ function drawPauseMenu() {
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 36px Impact, monospace';
   ctx.fillText('SETTINGS', canvas.width / 2, buttonY + 40);
-  
-  window.pauseButtons.push(settingsButton);
 
   // Quit to Menu button
   buttonY += buttonSpacing;
@@ -1565,8 +2125,10 @@ function drawPauseMenu() {
     y: buttonY,
     width: buttonWidth,
     height: buttonHeight,
-    action: 'quit'
+    action: 'quit',
+    buttonIndex: 3
   };
+  window.pauseButtons.push(quitButton);
   
   ctx.fillStyle = isButtonHovered(quitButton) ? '#555555' : '#444444';
   ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
@@ -1576,8 +2138,6 @@ function drawPauseMenu() {
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 36px Impact, monospace';
   ctx.fillText('QUIT TO MENU', canvas.width / 2, buttonY + 40);
-  
-  window.pauseButtons.push(quitButton);
 
   // Instructions
   ctx.fillStyle = '#aaaaaa';
@@ -1609,7 +2169,9 @@ function drawMenu() {
   // Start Game button
   let startX = canvas.width / 2 - 150;
   let startY = 300;
-  const startButton = { x: startX, y: startY, width: 300, height: 60, action: 'startGame' };
+  const startButton = { x: startX, y: startY, width: 300, height: 60, action: 'startGame', buttonIndex: 0 };
+  window.menuButtons.push(startButton);
+  
   ctx.fillStyle = isButtonHovered(startButton) ? '#555555' : '#444444';
   ctx.fillRect(startX, startY, 300, 60);
   ctx.strokeStyle = isButtonHovered(startButton) ? '#aaaaaa' : '#888888';
@@ -1619,12 +2181,12 @@ function drawMenu() {
   ctx.fillStyle = '#ffffff';
   ctx.font = '32px Arial, sans-serif';
   ctx.fillText('START GAME', canvas.width / 2, startY + 40);
-  
-  window.menuButtons.push(startButton);
 
   // Settings button
   let settingsY = 380;
-  const settingsButton = { x: startX, y: settingsY, width: 300, height: 60, action: 'settings' };
+  const settingsButton = { x: startX, y: settingsY, width: 300, height: 60, action: 'settings', buttonIndex: 1 };
+  window.menuButtons.push(settingsButton);
+  
   ctx.fillStyle = isButtonHovered(settingsButton) ? '#555555' : '#444444';
   ctx.fillRect(startX, settingsY, 300, 60);
   ctx.strokeStyle = isButtonHovered(settingsButton) ? '#aaaaaa' : '#888888';
@@ -1634,12 +2196,12 @@ function drawMenu() {
   ctx.fillStyle = '#ffffff';
   ctx.font = '32px Arial, sans-serif';
   ctx.fillText('SETTINGS', canvas.width / 2, settingsY + 40);
-  
-  window.menuButtons.push(settingsButton);
 
   // Customize button
   let customizeY = 460;
-  const customizeButton = { x: startX, y: customizeY, width: 300, height: 60, action: 'customize' };
+  const customizeButton = { x: startX, y: customizeY, width: 300, height: 60, action: 'customize', buttonIndex: 2 };
+  window.menuButtons.push(customizeButton);
+  
   ctx.fillStyle = isButtonHovered(customizeButton) ? '#555555' : '#444444';
   ctx.fillRect(startX, customizeY, 300, 60);
   ctx.strokeStyle = isButtonHovered(customizeButton) ? '#aaaaaa' : '#888888';
@@ -1649,8 +2211,6 @@ function drawMenu() {
   ctx.fillStyle = '#ffffff';
   ctx.font = '32px Arial, sans-serif';
   ctx.fillText('CUSTOMIZE', canvas.width / 2, customizeY + 40);
-  
-  window.menuButtons.push(customizeButton);
 
   // Instructions
   ctx.fillStyle = '#666666';
@@ -1769,10 +2329,18 @@ function adjustBrightness(color, percent) {
     (B < 255 ? B < 1 ? 0 : B : 255)).toString(16).slice(1);
 }
 
-// Check if mouse is hovering over a button
+// Check if mouse is hovering over a button or if it's selected via keyboard
 function isButtonHovered(button) {
-  return mouseX >= button.x && mouseX <= button.x + button.width &&
+  const mouseHover = mouseX >= button.x && mouseX <= button.x + button.width &&
          mouseY >= button.y && mouseY <= button.y + button.height;
+  
+  // Also highlight if this button is selected via keyboard navigation
+  // Use buttonIndex property if available
+  if (button.buttonIndex !== undefined) {
+    return mouseHover || button.buttonIndex === selectedButtonIndex;
+  }
+  
+  return mouseHover;
 }
 
 // Draw customization screen
@@ -1787,6 +2355,7 @@ function drawCustomization() {
   ctx.fillText('CUSTOMIZE PLAYER', canvas.width / 2, 100);
 
   window.customizeButtons = [];
+  let customizeButtonIndex = 0;
 
   // Color selection
   ctx.fillStyle = '#ffffff';
@@ -1800,8 +2369,18 @@ function drawCustomization() {
 
   playerColors.forEach((color, index) => {
     const x = colorStartX + index * colorSpacing - colorBoxSize / 2;
-    const colorBox = { x: x, y: colorY, width: colorBoxSize, height: colorBoxSize };
     const isUnlocked = isColorUnlocked(color);
+    const colorBox = { 
+      x: x, 
+      y: colorY, 
+      width: colorBoxSize, 
+      height: colorBoxSize,
+      buttonIndex: isUnlocked ? customizeButtonIndex : undefined
+    };
+    
+    if (isUnlocked) {
+      customizeButtonIndex++;
+    }
     
     // Draw color box (dimmed if locked)
     if (isUnlocked) {
@@ -1840,10 +2419,7 @@ function drawCustomization() {
     ctx.fillText(color.name, x + colorBoxSize / 2, colorY + colorBoxSize + 20);
     
     window.customizeButtons.push({
-      x: x,
-      y: colorY,
-      width: colorBoxSize,
-      height: colorBoxSize,
+      ...colorBox,
       action: 'color',
       value: color.value,
       unlocked: isUnlocked
@@ -1864,6 +2440,17 @@ function drawCustomization() {
   playerTrails.forEach((trail, index) => {
     const x = trailStartX + index * trailSpacing - trailBoxSize / 2;
     const isUnlocked = isTrailUnlocked(trail);
+    const trailBox = { 
+      x: x, 
+      y: trailY, 
+      width: trailBoxSize, 
+      height: trailBoxSize,
+      buttonIndex: isUnlocked ? customizeButtonIndex : undefined
+    };
+    
+    if (isUnlocked) {
+      customizeButtonIndex++;
+    }
     
     // Draw background box (dimmed if locked)
     ctx.fillStyle = isUnlocked ? '#333333' : '#222222';
@@ -1932,8 +2519,6 @@ function drawCustomization() {
       ctx.fillText('🔒', x + trailBoxSize / 2, trailY + trailBoxSize / 2 + 15);
     }
     
-    const trailBox = { x: x, y: trailY, width: trailBoxSize, height: trailBoxSize };
-    
     // Highlight selected or hovered (only if unlocked)
     if (playerTrail === trail.value && isUnlocked) {
       ctx.strokeStyle = '#ffff44';
@@ -1955,10 +2540,7 @@ function drawCustomization() {
     ctx.fillText(trail.name, x + trailBoxSize / 2, trailY + trailBoxSize + 20);
     
     window.customizeButtons.push({
-      x: x,
-      y: trailY,
-      width: trailBoxSize,
-      height: trailBoxSize,
+      ...trailBox,
       action: 'trail',
       value: trail.value,
       unlocked: isUnlocked
@@ -2065,8 +2647,11 @@ function drawChapterSelect() {
       y: buttonY,
       width: buttonWidth,
       height: buttonHeight,
-      chapter: i
+      chapter: i,
+      buttonIndex: i
     };
+    
+    window.chapterButtons.push(chapterBtn);
     
     const colors = getChapterColors(i);
     const completion = getChapterCompletion(i);
@@ -2209,6 +2794,7 @@ function drawLevelSelect() {
   let y = 220;
   let x = 0;
   window.levelButtons = [];
+  let buttonIndexCounter = 0;
   
   for (let i = 0; i < chapterInfo.levels.length; i++) {
     if(i == 5) {
@@ -2229,8 +2815,15 @@ function drawLevelSelect() {
       width: 90,
       height: 90,
       levelInChapter: i,
-      isUnlocked: isUnlocked
+      isUnlocked: isUnlocked,
+      buttonIndex: isUnlocked ? buttonIndexCounter : undefined
     };
+    
+    if (isUnlocked) {
+      buttonIndexCounter++;
+    }
+    
+    window.levelButtons.push(levelBtn);
     
     // Draw button - darker if locked
     if (isUnlocked) {
@@ -2286,7 +2879,6 @@ function drawLevelSelect() {
       }
     }
     
-    window.levelButtons.push(levelBtn);
     x++;
   }
 
@@ -2305,8 +2897,11 @@ function drawLevelSelect() {
       height: 90,
       levelInChapter: -1,
       isUnlocked: true,
-      isBonus: true
+      isBonus: true,
+      buttonIndex: buttonIndexCounter
     };
+    
+    window.levelButtons.push(bonusBtn);
     
     // Draw bonus button - special gold color
     if (isBonusCompleted) {
@@ -2344,8 +2939,6 @@ function drawLevelSelect() {
       ctx.font = '18px monospace';
       ctx.fillText('Press B', bonusX + 45, bonusY + 65);
     }
-    
-    window.levelButtons.push(bonusBtn);
   }
 
   // Back button
@@ -2477,12 +3070,25 @@ function drawSettings() {
     }
   ];
 
+  // Buttons for keyboard navigation
+  window.settingsButtons = [];
+
   // Back button
   let backX = 50;
   let backY = canvas.height - 100;
-  ctx.fillStyle = '#444444';
+  const backButton = {
+    x: backX,
+    y: backY,
+    width: 120,
+    height: 50,
+    action: 'back',
+    buttonIndex: 0
+  };
+  window.settingsButtons.push(backButton);
+  
+  ctx.fillStyle = isButtonHovered(backButton) ? '#555555' : '#444444';
   ctx.fillRect(backX, backY, 120, 50);
-  ctx.strokeStyle = '#888888';
+  ctx.strokeStyle = isButtonHovered(backButton) ? '#aaaaaa' : '#888888';
   ctx.lineWidth = 3;
   ctx.strokeRect(backX, backY, 120, 50);
   
@@ -2490,12 +3096,33 @@ function drawSettings() {
   ctx.font = '24px monospace';
   ctx.fillText('BACK', backX + 60, backY + 32);
   
-  window.backButton = {
-    x: backX,
-    y: backY,
-    width: 120,
-    height: 50
+  window.backButton = backButton;
+
+  // Reset Progress button
+  let resetX = canvas.width - 220;
+  let resetY = canvas.height - 100;
+  const resetButton = {
+    x: resetX,
+    y: resetY,
+    width: 170,
+    height: 50,
+    action: 'reset',
+    buttonIndex: 1
   };
+  window.settingsButtons.push(resetButton);
+  
+  ctx.fillStyle = isButtonHovered(resetButton) ? '#664444' : '#553333';
+  ctx.fillRect(resetX, resetY, 170, 50);
+  ctx.strokeStyle = isButtonHovered(resetButton) ? '#aa6666' : '#886666';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(resetX, resetY, 170, 50);
+  
+  ctx.fillStyle = '#ff8888';
+  ctx.font = '20px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('RESET PROGRESS', resetX + 85, resetY + 32);
+  
+  window.resetButton = resetButton;
 
   // Instructions
   ctx.fillStyle = '#666666';
@@ -2577,6 +3204,17 @@ function handleClick(event) {
         y >= button.y && y <= button.y + button.height) {
       transitionToState(previousGameState || 'menu');
     }
+    
+    // Check reset button
+    if (window.resetButton) {
+      const resetBtn = window.resetButton;
+      if (x >= resetBtn.x && x <= resetBtn.x + resetBtn.width &&
+          y >= resetBtn.y && y <= resetBtn.y + resetBtn.height) {
+        if (confirm('Are you sure you want to reset all progress? This cannot be undone!')) {
+          resetProgress();
+        }
+      }
+    }
   }
 
   // Check chapter selection buttons
@@ -2652,7 +3290,104 @@ function handleClick(event) {
 
 // Keyboard event listeners
 window.addEventListener('keydown', (e) => {
-  // Movement keys
+  // Enable audio on any key press
+  tryEnableAudio();
+
+  // Arrow key navigation for menus (not during gameplay)
+  if (['menu', 'chapterSelect', 'levelSelect', 'customize', 'paused', 'settings'].includes(gameState)) {
+    const buttons = getCurrentButtons();
+    
+    if (e.code === 'ArrowDown') {
+      e.preventDefault();
+      if (buttons.length > 0) {
+        selectedButtonIndex = (selectedButtonIndex + 1) % buttons.length;
+      }
+      return;
+    }
+    
+    if (e.code === 'ArrowUp') {
+      e.preventDefault();
+      if (buttons.length > 0) {
+        selectedButtonIndex = (selectedButtonIndex - 1 + buttons.length) % buttons.length;
+      }
+      return;
+    }
+    
+    // Enter key to activate selected button
+    if (e.code === 'Enter' || e.code === 'NumpadEnter') {
+      e.preventDefault();
+      if (buttons.length > 0 && buttons[selectedButtonIndex]) {
+        const button = buttons[selectedButtonIndex];
+        
+        // Menu buttons
+        if (gameState === 'menu') {
+          if (button.action === 'startGame') {
+            transitionToState('chapterSelect');
+          } else if (button.action === 'settings') {
+            previousGameState = gameState;
+            transitionToState('settings');
+          } else if (button.action === 'customize') {
+            previousGameState = gameState;
+            transitionToState('customize');
+          }
+        }
+        
+        // Chapter select buttons
+        if (gameState === 'chapterSelect') {
+          currentChapter = button.chapter;
+          transitionToState('levelSelect');
+        }
+        
+        // Level select buttons
+        if (gameState === 'levelSelect' && button.isUnlocked) {
+          if (button.isBonus) {
+            const bonusGlobalIndex = getBonusLevelGlobalIndex(currentChapter);
+            loadLevel(bonusGlobalIndex);
+          } else {
+            loadLevelFromChapter(currentChapter, button.levelInChapter);
+          }
+        }
+        
+        // Customize buttons
+        if (gameState === 'customize') {
+          if (button.action === 'color' && button.unlocked !== false) {
+            playerColor = button.value;
+            saveProgress();
+          } else if (button.action === 'trail' && button.unlocked !== false) {
+            playerTrail = button.value;
+            saveProgress();
+          }
+        }
+        
+        // Pause menu buttons
+        if (gameState === 'paused') {
+          if (button.action === 'resume') {
+            gameState = 'playing';
+          } else if (button.action === 'restart') {
+            loadLevel(currentLevel);
+            gameState = 'playing';
+          } else if (button.action === 'settings') {
+            previousGameState = 'playing';
+            transitionToState('settings');
+          } else if (button.action === 'quit') {
+            transitionToState('menu');
+          }
+        }
+        
+        // Settings buttons
+        if (gameState === 'settings') {
+          if (button === window.resetButton) {
+            if (confirm('Are you sure you want to reset all progress? This cannot be undone!')) {
+              resetProgress();
+            }
+          }
+        }
+      }
+      return;
+    }
+  }
+
+  // Movement keys (only during gameplay)
   if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
     keys.left = true;
   }
@@ -2670,6 +3405,21 @@ window.addEventListener('keydown', (e) => {
   // Debug mode toggle
   if (ENABLE_DEBUG_FEATURES && e.code === 'KeyT') {
     DEBUG_MODE = !DEBUG_MODE;
+  }
+  
+  // Gravity zone debug controls (only in debug mode)
+  if (ENABLE_DEBUG_FEATURES && DEBUG_MODE && ENABLE_GRAVITY_ZONES && player && gameState === 'playing') {
+    // G key: manually toggle gravity
+    if (e.code === 'KeyG') {
+      player.gravityScale *= -1;
+      player.gravityIndicatorAlpha = 1.0;
+      spawnGravityFlipParticles(player.x, player.y);
+    }
+    
+    // H key: lock/unlock gravity (prevent zones from changing it)
+    if (e.code === 'KeyH') {
+      player.gravityLocked = !player.gravityLocked;
+    }
   }
 
   // Number keys for quick chapter selection (only in chapterSelect state)
