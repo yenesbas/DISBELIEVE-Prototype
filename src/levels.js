@@ -308,8 +308,8 @@ const chapters = [
           "..##III#............",
           "...#000#FFFF########"
         ],
-        spikeTriggers: [-4, -3, -2, -4, -3],
-        spikeTriggerLengths: [250, 250, 250, 83, 84]
+        spikeTriggers: [-4, -3, -2, -4, -3, -1.1, -1.2, -1.3, -4.5, -3.5, -2.6, -1.7],
+        spikeTriggerLengths: [250, 250, 250, 83, 84, 85, 86, 87, 241, 242, 190, 91]
       }
     ],
     bonusLevel: {
