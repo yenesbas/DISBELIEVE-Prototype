@@ -923,11 +923,6 @@ function update(deltaTime) {
     player.hasJumped = false;
   }
 
-  // Restart key
-  if (keys.r) {
-    loadLevel(currentLevel);
-  }
-
   // Apply gravity (scaled by deltaTime and gravity direction)
   const effectiveGravity = GRAVITY * player.gravityScale;
   player.vy += effectiveGravity * deltaTime;
@@ -3191,6 +3186,64 @@ canvas.addEventListener('mousemove', (e) => {
   const scaleY = canvas.height / rect.height;
   mouseX = (e.clientX - rect.left) * scaleX;
   mouseY = (e.clientY - rect.top) * scaleY;
+});
+
+// Volume slider drag handling
+let isDraggingSlider = false;
+let activeSlider = null;
+
+canvas.addEventListener('mousedown', (e) => {
+  if (gameState !== 'settings' || !window.volumeSliders) return;
+  
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+  
+  // Check if clicking on a slider
+  window.volumeSliders.forEach(slider => {
+    if (x >= slider.x && x <= slider.x + slider.width &&
+        y >= slider.y && y <= slider.y + slider.height) {
+      isDraggingSlider = true;
+      activeSlider = slider;
+      
+      // Immediately set value based on click position
+      const value = Math.max(0, Math.min(1, (x - slider.x) / slider.width));
+      if (slider.type === 'master') {
+        setMasterVolume(value);
+      } else if (slider.type === 'music') {
+        setMusicVolume(value);
+      } else if (slider.type === 'sfx') {
+        setSfxVolume(value);
+      }
+    }
+  });
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  mouseX = (e.clientX - rect.left) * scaleX;
+  mouseY = (e.clientY - rect.top) * scaleY;
+  
+  // Handle slider dragging
+  if (isDraggingSlider && activeSlider) {
+    const x = (e.clientX - rect.left) * scaleX;
+    
+    const value = Math.max(0, Math.min(1, (x - activeSlider.x) / activeSlider.width));
+    if (activeSlider.type === 'master') {
+      setMasterVolume(value);
+    } else if (activeSlider.type === 'music') {
+      setMusicVolume(value);
+    } else if (activeSlider.type === 'sfx') {
+      setSfxVolume(value);
+    }
+  }
+});
+
+canvas.addEventListener('mouseup', () => {
+  isDraggingSlider = false;
+  activeSlider = null;
 });
 
 // Start the game when page loads
