@@ -227,6 +227,10 @@ let coyoteTime = 0; // Time remaining to allow jump after leaving platform
 const DEATH_FLASH_DURATION = 0.2;
 const LEVEL_COMPLETE_DURATION = 1.5;
 
+// Customization unlock notification
+let showUnlockNotification = false;
+let unlockedItems = []; // Array of {type: 'color'|'trail', name: string, value: string}
+
 // Transition animations
 let transitionState = 'none'; // 'none', 'fadeOut', 'fadeIn'
 let transitionAlpha = 0;
@@ -332,7 +336,13 @@ function isLevelUnlocked(chapterIndex, levelInChapter) {
   // First level of first chapter is always unlocked
   if (chapterIndex === 0 && levelInChapter === 0) return true;
   
-  // Check if previous level is completed
+  // For first level of a chapter (not chapter 1), check if previous chapter is completed
+  if (levelInChapter === 0 && chapterIndex > 0) {
+    // Previous chapter must be completed (all 10 regular levels, bonus NOT required)
+    return isChapterCompleted(chapterIndex - 1);
+  }
+  
+  // For levels within a chapter, check if previous level in same chapter is completed
   const globalIndex = getGlobalLevelIndex(chapterIndex, levelInChapter);
   const previousGlobalIndex = globalIndex - 1;
   
@@ -826,19 +836,50 @@ function update(deltaTime) {
         loadLevelFromChapter(currentChapter, currentLevelInChapter + 1);
         updateStats();
       } else {
-        // Chapter complete
-        if (currentChapter < chapters.length - 1) {
-          // More chapters available, go to chapter select
-          gameState = 'chapterSelect';
-          currentChapter = 0;
-          currentLevel = 0;
-          currentLevelInChapter = 0;
+        // Chapter complete - check for unlocked customization items
+        unlockedItems = [];
+        
+        // Check for newly unlocked colors
+        playerColors.forEach(color => {
+          if (color.unlockChapter === currentChapter) {
+            unlockedItems.push({
+              type: 'color',
+              name: color.name,
+              value: color.value
+            });
+          }
+        });
+        
+        // Check for newly unlocked trails
+        playerTrails.forEach(trail => {
+          if (trail.unlockChapter === currentChapter) {
+            unlockedItems.push({
+              type: 'trail',
+              name: trail.name,
+              value: trail.value
+            });
+          }
+        });
+        
+        // Show unlock notification if there are new items
+        if (unlockedItems.length > 0) {
+          showUnlockNotification = true;
+          gameState = 'unlockNotification';
         } else {
-          // All chapters complete, return to main menu
-          gameState = 'menu';
-          currentChapter = 0;
-          currentLevel = 0;
-          currentLevelInChapter = 0;
+          // No unlocks, proceed normally
+          if (currentChapter < chapters.length - 1) {
+            // More chapters available, go to chapter select
+            gameState = 'chapterSelect';
+            currentChapter = 0;
+            currentLevel = 0;
+            currentLevelInChapter = 0;
+          } else {
+            // All chapters complete, return to main menu
+            gameState = 'menu';
+            currentChapter = 0;
+            currentLevel = 0;
+            currentLevelInChapter = 0;
+          }
         }
       }
     }
@@ -1691,6 +1732,91 @@ function render() {
   // Update trigger info display below canvas
   updateTriggerInfo();
   
+  // Draw unlock notification screen (after chapter complete)
+  if (gameState === 'unlockNotification') {
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Main notification box
+    const boxWidth = 600;
+    const boxHeight = 400;
+    const boxX = canvas.width / 2 - boxWidth / 2;
+    const boxY = canvas.height / 2 - boxHeight / 2;
+    
+    // Box background with gradient
+    const gradient = ctx.createLinearGradient(boxX, boxY, boxX, boxY + boxHeight);
+    gradient.addColorStop(0, '#2a2a4a');
+    gradient.addColorStop(1, '#1a1a2a');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+    
+    // Box border with glow effect
+    ctx.shadowColor = '#8c44ff';
+    ctx.shadowBlur = 20;
+    ctx.strokeStyle = '#8c44ff';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+    ctx.shadowBlur = 0;
+    
+    // Title
+    ctx.fillStyle = '#ffdd44';
+    ctx.font = 'bold 48px Impact, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('🎉 NEW UNLOCKS! 🎉', canvas.width / 2, boxY + 70);
+    
+    // Subtitle
+    ctx.fillStyle = '#aaaaaa';
+    ctx.font = '22px Arial, sans-serif';
+    ctx.fillText('Chapter Complete! You earned:', canvas.width / 2, boxY + 110);
+    
+    // Display unlocked items
+    let itemY = boxY + 160;
+    unlockedItems.forEach(item => {
+      if (item.type === 'color') {
+        // Color unlock
+        ctx.fillStyle = item.value;
+        ctx.beginPath();
+        ctx.arc(canvas.width / 2 - 150, itemY + 10, 25, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 28px Arial, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`${item.name} Color`, canvas.width / 2 - 110, itemY + 18);
+        
+        ctx.fillStyle = '#888888';
+        ctx.font = '18px Arial, sans-serif';
+        ctx.fillText('Available in Customization', canvas.width / 2 - 110, itemY + 45);
+      } else if (item.type === 'trail') {
+        // Trail unlock
+        ctx.fillStyle = '#8c44ff';
+        ctx.font = 'bold 32px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('✨', canvas.width / 2 - 150, itemY + 18);
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 28px Arial, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`${item.name} Trail`, canvas.width / 2 - 110, itemY + 18);
+        
+        ctx.fillStyle = '#888888';
+        ctx.font = '18px Arial, sans-serif';
+        ctx.fillText('Available in Customization', canvas.width / 2 - 110, itemY + 45);
+      }
+      
+      itemY += 80;
+    });
+    
+    // Continue message
+    ctx.fillStyle = '#44ff44';
+    ctx.font = '24px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Press SPACE or ENTER to continue', canvas.width / 2, boxY + boxHeight - 40);
+    
+    ctx.textAlign = 'left';
+  }
+  
   // Draw pause menu overlay if paused (must be after game is drawn)
   if (gameState === 'paused') {
     console.log('Drawing pause menu!'); // DEBUG
@@ -2409,8 +2535,6 @@ function drawChapterSelect() {
       ctx.textAlign = 'right';
       ctx.fillText('✓', buttonX + buttonWidth - 15, buttonY + 35);
     }
-    
-    window.chapterButtons.push(chapterBtn);
   }
 
   // Back button
@@ -2779,7 +2903,7 @@ function drawSettings() {
   const resetButton = {
     x: resetX,
     y: resetY,
-    width: 170,
+    width: 200,
     height: 50,
     action: 'reset',
     buttonIndex: 1
@@ -2787,21 +2911,21 @@ function drawSettings() {
   window.settingsButtons.push(resetButton);
   
   ctx.fillStyle = isButtonHovered(resetButton) ? '#664444' : '#553333';
-  ctx.fillRect(resetX, resetY, 170, 50);
+  ctx.fillRect(resetX, resetY, 200, 50);
   ctx.strokeStyle = isButtonHovered(resetButton) ? '#aa6666' : '#886666';
   ctx.lineWidth = 3;
-  ctx.strokeRect(resetX, resetY, 170, 50);
+  ctx.strokeRect(resetX, resetY, 200, 50);
   
   ctx.fillStyle = '#ff8888';
   ctx.font = '20px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('RESET PROGRESS', resetX + 85, resetY + 32);
+  ctx.fillText('RESET PROGRESS', resetX + 100, resetY + 32);
   
   window.resetButton = resetButton;
 
   // Instructions
   ctx.fillStyle = '#666666';
-  ctx.font = '24px monospace';
+  ctx.font = '20px monospace';
   ctx.fillText('ESC - Back to Menu  |  Click and drag sliders to adjust volume', canvas.width / 2, canvas.height - 30);
 
   ctx.textAlign = 'left';
@@ -2967,6 +3091,31 @@ function handleClick(event) {
 window.addEventListener('keydown', (e) => {
   // Enable audio on any key press
   tryEnableAudio();
+
+  // Handle unlock notification dismissal
+  if (gameState === 'unlockNotification') {
+    if (e.code === 'Space' || e.code === 'Enter' || e.code === 'NumpadEnter') {
+      e.preventDefault();
+      showUnlockNotification = false;
+      unlockedItems = [];
+      
+      // Continue to appropriate state
+      if (currentChapter < chapters.length - 1) {
+        // More chapters available, go to chapter select
+        gameState = 'chapterSelect';
+        currentChapter = 0;
+        currentLevel = 0;
+        currentLevelInChapter = 0;
+      } else {
+        // All chapters complete, return to main menu
+        gameState = 'menu';
+        currentChapter = 0;
+        currentLevel = 0;
+        currentLevelInChapter = 0;
+      }
+    }
+    return;
+  }
 
   // Arrow key navigation for menus (not during gameplay)
   if (['menu', 'chapterSelect', 'levelSelect', 'customize', 'paused', 'settings'].includes(gameState)) {
