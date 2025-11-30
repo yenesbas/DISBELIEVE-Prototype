@@ -16,6 +16,7 @@ const JUMP_FORCE = -840 * 1.25; // Adjusted for time-based physics
 const MOVE_SPEED = 380; // Adjusted for time-based physics
 const SPIKE_TRIGGER_DISTANCE = 420;
 const SPIKE_MOVE_DISTANCE = TILE_SIZE * 2;
+const COYOTE_TIME_DURATION = 0.1; // 100ms window to jump after leaving platform
 
 // Sound system
 const sounds = {
@@ -222,6 +223,7 @@ let levelTime = 0; // Time spent in current level (in seconds)
 let isDead = false;
 let deathFlashTimer = 0;
 let levelCompleteTimer = 0;
+let coyoteTime = 0; // Time remaining to allow jump after leaving platform
 const DEATH_FLASH_DURATION = 0.2;
 const LEVEL_COMPLETE_DURATION = 1.5;
 
@@ -906,14 +908,22 @@ function update(deltaTime) {
     player.vx = 0;
   }
 
-  // Jumping
-  if (keys.space && player.onGround && !player.hasJumped) {
+  // Coyote time: Set timer when on ground, decrement when airborne
+  if (player.onGround) {
+    coyoteTime = COYOTE_TIME_DURATION;
+  } else if (coyoteTime > 0) {
+    coyoteTime -= deltaTime;
+  }
+
+  // Jumping (allow jump if on ground OR within coyote time window)
+  if (keys.space && (player.onGround || coyoteTime > 0) && !player.hasJumped) {
     // Jump force inverts based on gravity direction
     // JUMP_FORCE is negative (-1050), so multiply by gravityScale:
     // Normal gravity (scale=1): -1050 * 1 = -1050 (upward)
     // Inverted gravity (scale=-1): -1050 * -1 = +1050 (downward in inverted world)
     player.vy = JUMP_FORCE * player.gravityScale;
     player.onGround = false;
+    coyoteTime = 0; // Use up coyote time immediately
     player.hasJumped = true;
     playSound('jump'); // Play jump sound
   }
