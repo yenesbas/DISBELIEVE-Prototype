@@ -1121,6 +1121,12 @@ function update(deltaTime) {
     die();
   }
   
+  // Fall off top of screen = death (for inverted gravity levels)
+  // Player dies if they go 5 blocks (300 pixels) above the screen
+  if (player.y < -300) {
+    die();
+  }
+  
   // Update trail history (only during gameplay)
   if (gameState === 'playing' && !isDead) {
     trailHistory.push({ x: player.x, y: player.y, alpha: 1.0 });
