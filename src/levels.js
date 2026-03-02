@@ -295,6 +295,23 @@ const chapters = [
       {
         name: "Level 3: The Invisible Maze",
         map: [
+          "...................D",
+          "....................",
+          "....................",
+          "...##G..............",
+          "....................",
+          "#....G###....#####Gg",
+          "....................",
+          "#######Gg...........",
+          ".S..................",
+          "##..................",
+          "....................",
+          "...Gg.....##......Gg"
+        ]
+      },
+      {
+        name: "Level 4: The Invisible Maze",
+        map: [
           ".....Gg...Ggg.......",
           "....................",
           "....................",
@@ -351,3 +368,12 @@ const chapters = [
     }
   }
 ];
+
+
+
+/* Total Deaths in Chapter 1
+* MH: 121 (Level 10 rage quit)
+* Serkan: 85 (Level 9 rage quit)
+* Serhat Abi: 130 (Level 10 rage quit)
+* Kadir Ihsan: 112 Chapter 1 complete
+*/
