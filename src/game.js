@@ -333,6 +333,7 @@ function isChapterCompleted(chapterIndex) {
 }
 
 function isLevelUnlocked(chapterIndex, levelInChapter) {
+  if (DEVELOPER_MODE) return true; // Developer mode unlocks all levels
   // First level of first chapter is always unlocked
   if (chapterIndex === 0 && levelInChapter === 0) return true;
   
@@ -350,6 +351,7 @@ function isLevelUnlocked(chapterIndex, levelInChapter) {
 }
 
 function isBonusLevelUnlocked(chapterIndex) {
+  if (DEVELOPER_MODE) return true; // Developer mode unlocks all bonus levels
   // Bonus level unlocks when level 10 of the chapter is completed
   const level10GlobalIndex = getGlobalLevelIndex(chapterIndex, 9); // Level 10 = index 9
   return completedLevels.has(level10GlobalIndex);
@@ -357,12 +359,14 @@ function isBonusLevelUnlocked(chapterIndex) {
 
 // Check if a color is unlocked
 function isColorUnlocked(color) {
+  if (DEVELOPER_MODE) return true; // Developer mode unlocks everything
   if (color.unlockChapter === -1) return true; // Always unlocked
   return isChapterCompleted(color.unlockChapter);
 }
 
 // Check if a trail is unlocked
 function isTrailUnlocked(trail) {
+  if (DEVELOPER_MODE) return true; // Developer mode unlocks everything
   if (trail.unlockChapter === -1) return true; // Always unlocked
   return isChapterCompleted(trail.unlockChapter);
 }
@@ -426,6 +430,9 @@ const ENABLE_DEBUG_FEATURES = true;
 // DEBUG MODE - Only works if ENABLE_DEBUG_FEATURES is true
 let DEBUG_MODE = false;
 
+// DEVELOPER MODE - Secret cheat code activated
+let DEVELOPER_MODE = false;
+
 // GRAVITY ZONES FEATURE - Set to true to enable gravity flip zones
 const ENABLE_GRAVITY_ZONES = true;
 
@@ -443,6 +450,10 @@ let mouseY = 0;
 
 // Keyboard navigation
 let selectedButtonIndex = 0; // Index of currently selected button for keyboard navigation
+
+// Secret cheat code tracking
+let recentKeys = ''; // Track recent keypresses for cheat code
+const CHEAT_CODE = 'lolipop'; // Secret code to activate developer mode
 
 // Track document visibility
 let isVisible = true;
@@ -1342,8 +1353,8 @@ function updateTriggerInfo() {
 
 // Render game
 function render() {
-  // Clear screen
-  ctx.fillStyle = '#2a2a2a';
+  // Clear screen - use special color in developer mode
+  ctx.fillStyle = DEVELOPER_MODE ? '#1a1a3a' : '#2a2a2a';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   // Menu screen
@@ -1600,6 +1611,14 @@ function render() {
   // Draw player
   if (!isDead && (gameState === 'playing' || gameState === 'paused')) {
     drawPlayer(player.x, player.y, player.width, player.height);
+    
+    // Developer mode indicator
+    if (DEVELOPER_MODE) {
+      ctx.fillStyle = 'rgba(255, 215, 0, 0.8)';
+      ctx.font = 'bold 16px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText('🎮 DEV MODE', 10, 25);
+    }
   }
   
   // Draw gravity flip particles
@@ -1956,7 +1975,8 @@ function drawPauseMenu() {
 
 // Draw main menu
 function drawMenu() {
-  ctx.fillStyle = '#2a2a2a';
+  // Use special background color in developer mode
+  ctx.fillStyle = DEVELOPER_MODE ? '#1a1a3a' : '#2a2a2a';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   // Title
@@ -2175,7 +2195,8 @@ function isButtonHovered(button) {
 
 // Draw customization screen
 function drawCustomization() {
-  ctx.fillStyle = '#2a2a2a';
+  // Use special background color in developer mode
+  ctx.fillStyle = DEVELOPER_MODE ? '#1a1a3a' : '#2a2a2a';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   // Title
@@ -2183,6 +2204,13 @@ function drawCustomization() {
   ctx.font = 'bold 72px Impact, monospace';
   ctx.textAlign = 'center';
   ctx.fillText('CUSTOMIZE PLAYER', canvas.width / 2, 100);
+  
+  // Developer mode indicator
+  if (DEVELOPER_MODE) {
+    ctx.fillStyle = 'rgba(255, 215, 0, 0.9)';
+    ctx.font = 'bold 20px monospace';
+    ctx.fillText('🎮 DEVELOPER MODE - ALL UNLOCKED', canvas.width / 2, 140);
+  }
 
   window.customizeButtons = [];
   let customizeButtonIndex = 0;
@@ -2296,22 +2324,6 @@ function drawCustomization() {
       if (trail.value === 'none') {
         // Just the player box
         ctx.fillRect(centerX - boxSize/2, centerY - boxSize/2, boxSize, boxSize);
-      } else if (trail.value === 'glow') {
-        // Glowing circles
-        const trailColor = playerColor.replace('#', '');
-        const r = parseInt(trailColor.substr(0, 2), 16);
-        const g = parseInt(trailColor.substr(2, 2), 16);
-        const b = parseInt(trailColor.substr(4, 2), 16);
-        
-        for (let i = 3; i > 0; i--) {
-          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.15 - i * 0.03})`;
-          ctx.beginPath();
-          ctx.arc(centerX, centerY, boxSize/2 + i * 6, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        // Main box
-        ctx.fillStyle = playerColor;
-        ctx.fillRect(centerX - boxSize/2, centerY - boxSize/2, boxSize, boxSize);
       } else if (trail.value === 'fade') {
         // Fading squares
         for (let i = 3; i >= 0; i--) {
@@ -2337,6 +2349,44 @@ function drawCustomization() {
           const particleX = centerX - 35 + Math.random() * 40;
           const particleY = centerY - 10 + Math.random() * 20;
           ctx.fillRect(particleX, particleY, 4, 4);
+        }
+      } else if (trail.value === 'dotted') {
+        // Main box
+        ctx.fillRect(centerX - boxSize/2, centerY - boxSize/2, boxSize, boxSize);
+        // Dotted trail - circular dots
+        const trailColor = playerColor.replace('#', '');
+        const r = parseInt(trailColor.substr(0, 2), 16);
+        const g = parseInt(trailColor.substr(2, 2), 16);
+        const b = parseInt(trailColor.substr(4, 2), 16);
+        for (let i = 0; i < 4; i++) {
+          const alpha = 0.6 - i * 0.12;
+          const offset = (i + 1) * 10;
+          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+          ctx.beginPath();
+          ctx.arc(centerX - offset, centerY, 5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else if (trail.value === 'dash') {
+        // Dashed trail - rectangular segments with gaps
+        const trailColor = playerColor.replace('#', '');
+        const r = parseInt(trailColor.substr(0, 2), 16);
+        const g = parseInt(trailColor.substr(2, 2), 16);
+        const b = parseInt(trailColor.substr(4, 2), 16);
+        
+        // Draw main box
+        ctx.fillStyle = playerColor;
+        ctx.fillRect(centerX - boxSize/2, centerY - boxSize/2, boxSize, boxSize);
+        
+        // Draw dashed segments
+        for (let i = 0; i < 4; i++) {
+          // Alternate between drawing and skipping
+          if (i % 2 === 0) {
+            const alpha = 0.55 - i * 0.1;
+            const offset = (i + 1) * 10;
+            const dashSize = boxSize * 0.8;
+            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+            ctx.fillRect(centerX - dashSize/2 - offset, centerY - dashSize/2, dashSize, dashSize);
+          }
         }
       }
     }
@@ -2453,7 +2503,8 @@ function getChapterCompletion(chapterIndex) {
 
 // Draw chapter selection screen
 function drawChapterSelect() {
-  ctx.fillStyle = '#2a2a2a';
+  // Use special background color in developer mode
+  ctx.fillStyle = DEVELOPER_MODE ? '#1a1a3a' : '#2a2a2a';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   // Title
@@ -2597,7 +2648,8 @@ function drawChapterSelect() {
 
 // Draw level selection screen
 function drawLevelSelect() {
-  ctx.fillStyle = '#2a2a2a';
+  // Use special background color in developer mode
+  ctx.fillStyle = DEVELOPER_MODE ? '#1a1a3a' : '#2a2a2a';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   // Get current chapter info
@@ -2800,7 +2852,8 @@ function drawLevelSelect() {
 
 // Draw settings screen
 function drawSettings() {
-  ctx.fillStyle = '#2a2a2a';
+  // Use special background color in developer mode
+  ctx.fillStyle = DEVELOPER_MODE ? '#1a1a3a' : '#2a2a2a';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   // Title
@@ -3120,6 +3173,31 @@ function handleClick(event) {
 window.addEventListener('keydown', (e) => {
   // Enable audio on any key press
   tryEnableAudio();
+
+  // Track keypresses for cheat code (only letters)
+  if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) {
+    recentKeys += e.key.toLowerCase();
+    // Keep only last 10 characters to prevent memory issues
+    if (recentKeys.length > 10) {
+      recentKeys = recentKeys.slice(-10);
+    }
+    
+    // Check if cheat code was entered (toggle developer mode)
+    if (recentKeys.includes(CHEAT_CODE)) {
+      if (!DEVELOPER_MODE) {
+        // Activate developer mode
+        DEVELOPER_MODE = true;
+        console.log('🎮 DEVELOPER MODE ACTIVATED! All customizations unlocked!');
+      } else {
+        // Deactivate developer mode and reset progress
+        DEVELOPER_MODE = false;
+        resetProgress();
+        console.log('❌ DEVELOPER MODE DEACTIVATED! Progress reset.');
+      }
+      // Reset recent keys to prevent re-triggering
+      recentKeys = '';
+    }
+  }
 
   // Handle unlock notification dismissal
   if (gameState === 'unlockNotification') {
