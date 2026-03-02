@@ -243,7 +243,7 @@ let levelStars = {}; // Stores star ratings (1-3) for each level: { globalLevelI
 
 // Player customization
 let playerColor = '#44aaff'; // Default blue (unlocked starter color)
-let playerTrail = 'none'; // 'none', 'fade', 'particles', 'glow'
+let playerTrail = 'none'; // 'none', 'fade', 'particles', 'dotted', 'dash'
 let trailHistory = []; // Store recent positions for trail effect
 
 const playerColors = [
@@ -259,8 +259,9 @@ const playerColors = [
 const playerTrails = [
   { name: 'None', value: 'none', description: 'No trail', unlockChapter: -1 }, // Always unlocked
   { name: 'Fade', value: 'fade', description: 'Fading trail', unlockChapter: -1 }, // Always unlocked
-  { name: 'Glow', value: 'glow', description: 'Glowing aura', unlockChapter: 0 }, // Unlock after Chapter 1
-  { name: 'Particles', value: 'particles', description: 'Particle effect', unlockChapter: 2 } // Unlock after Chapter 3
+  { name: 'Dotted', value: 'dotted', description: 'Dotted line trail', unlockChapter: 0 }, // Unlock after Chapter 1
+  { name: 'Particles', value: 'particles', description: 'Particle effect', unlockChapter: 1 }, // Unlock after Chapter 2
+  { name: 'Dash', value: 'dash', description: 'Dashed segments', unlockChapter: 2 } // Unlock after Chapter 3
 ];
 
 // Star rating thresholds (deaths required for each star)
@@ -2103,23 +2104,46 @@ function drawPlayerTrail() {
         }
       }
     });
-  } else if (playerTrail === 'glow') {
-    // Glowing aura - circular glow around player
-    const trailColor = playerColor.replace('#', '');
-    const r = parseInt(trailColor.substr(0, 2), 16);
-    const g = parseInt(trailColor.substr(2, 2), 16);
-    const b = parseInt(trailColor.substr(4, 2), 16);
-    
-    // Draw multiple circles with decreasing opacity for glow effect
-    for (let i = 3; i > 0; i--) {
-      const radius = player.width/2 + i * 8;
-      const alpha = 0.15 - (i * 0.03);
+  } else if (playerTrail === 'dotted') {
+    // Dotted trail - circular dots following the player
+    trailHistory.forEach((pos, index) => {
+      if (index % 3 === 0) { // Only every third position to create spacing
+        const alpha = pos.alpha * 0.6;
+        const trailColor = playerColor.replace('#', '');
+        const r = parseInt(trailColor.substr(0, 2), 16);
+        const g = parseInt(trailColor.substr(2, 2), 16);
+        const b = parseInt(trailColor.substr(4, 2), 16);
+        
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        ctx.beginPath();
+        const dotRadius = 6 + (pos.alpha * 4); // Dots shrink as they fade
+        ctx.arc(pos.x + player.width/2, pos.y + player.height/2, dotRadius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+  } else if (playerTrail === 'dash') {
+    // Dashed trail - rectangular segments with gaps
+    trailHistory.forEach((pos, index) => {
+      const segmentLength = 3; // How many positions to draw before gap
+      const gapLength = 2; // How many positions to skip
+      const cycle = segmentLength + gapLength;
       
-      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-      ctx.beginPath();
-      ctx.arc(player.x + player.width/2, player.y + player.height/2, radius, 0, Math.PI * 2);
-      ctx.fill();
-    }
+      if (index % cycle < segmentLength) { // Only draw during segment, not gap
+        const alpha = pos.alpha * 0.55;
+        const trailColor = playerColor.replace('#', '');
+        const r = parseInt(trailColor.substr(0, 2), 16);
+        const g = parseInt(trailColor.substr(2, 2), 16);
+        const b = parseInt(trailColor.substr(4, 2), 16);
+        
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        // Draw thinner rectangles for dash effect
+        const dashWidth = player.width * 0.8;
+        const dashHeight = player.height * 0.8;
+        const offsetX = (player.width - dashWidth) / 2;
+        const offsetY = (player.height - dashHeight) / 2;
+        ctx.fillRect(pos.x + offsetX, pos.y + offsetY, dashWidth, dashHeight);
+      }
+    });
   }
 }
 
