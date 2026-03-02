@@ -242,16 +242,15 @@ let completedLevels = new Set(); // Stores global level indices that have been c
 let levelStars = {}; // Stores star ratings (1-3) for each level: { globalLevelIndex: stars }
 
 // Player customization
-let playerColor = '#888888'; // Default gray (boring starter color)
+let playerColor = '#44aaff'; // Default blue (unlocked starter color)
 let playerTrail = 'none'; // 'none', 'fade', 'particles', 'glow'
 let trailHistory = []; // Store recent positions for trail effect
 
 const playerColors = [
-  { name: 'Gray', value: '#888888', unlockChapter: -1 }, // Always unlocked (starter color)
+  { name: 'Blue', value: '#44aaff', unlockChapter: -1 }, // Always unlocked (starter color)
+  { name: 'Green', value: '#44ff88', unlockChapter: -1 }, // Always unlocked
   { name: 'Purple', value: '#8c44ff', unlockChapter: 0 }, // Chapter 1 color
-  { name: 'Blue', value: '#44aaff', unlockChapter: 1 }, // Chapter 2 color
   { name: 'Orange', value: '#ff8844', unlockChapter: 2 }, // Chapter 3 color
-  { name: 'Green', value: '#44ff88', unlockChapter: 3 }, // Chapter 4 color
   { name: 'Red', value: '#ff4444', unlockChapter: 4 }, // Future chapter
   { name: 'Cyan', value: '#44ffff', unlockChapter: 5 }, // Future chapter
   { name: 'Pink', value: '#ff44aa', unlockChapter: 6 } // Future chapter
@@ -259,8 +258,8 @@ const playerColors = [
 
 const playerTrails = [
   { name: 'None', value: 'none', description: 'No trail', unlockChapter: -1 }, // Always unlocked
+  { name: 'Fade', value: 'fade', description: 'Fading trail', unlockChapter: -1 }, // Always unlocked
   { name: 'Glow', value: 'glow', description: 'Glowing aura', unlockChapter: 0 }, // Unlock after Chapter 1
-  { name: 'Fade', value: 'fade', description: 'Fading trail', unlockChapter: 1 }, // Unlock after Chapter 2
   { name: 'Particles', value: 'particles', description: 'Particle effect', unlockChapter: 2 } // Unlock after Chapter 3
 ];
 
@@ -288,7 +287,7 @@ function loadProgress() {
       const parsed = JSON.parse(saved);
       completedLevels = new Set(parsed.completedLevels || []);
       levelStars = parsed.levelStars || {};
-      playerColor = parsed.playerColor || '#4488ff';
+      playerColor = parsed.playerColor || '#44aaff';
       playerTrail = parsed.playerTrail || 'none';
     }
   } catch (e) {
@@ -313,7 +312,7 @@ function saveProgress() {
 function resetProgress() {
   completedLevels = new Set();
   levelStars = {};
-  playerColor = '#888888'; // Reset to default gray
+  playerColor = '#44aaff'; // Reset to default blue
   playerTrail = 'none';
   deaths = 0;
   localStorage.removeItem('disbelieveProgress');
