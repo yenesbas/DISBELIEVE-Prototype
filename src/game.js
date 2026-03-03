@@ -820,16 +820,8 @@ function resetPlayer() {
 
 // Update game state
 function update(deltaTime) {
-  // Update visual effects
-  if (gameState === 'playing' || gameState === 'paused') {
-    const visualStyle = getCurrentVisualStyle();
-    if (visualStyle === 'glitch') {
-      updateGlitchEffect(deltaTime);
-    } else if (visualStyle === 'sketch') {
-      updateSketchWobble(deltaTime);
-    }
-  }
-
+  // Visual effects are now static - no animation updates needed
+  
   // Handle transitions
   if (transitionState === 'fadeOut') {
     transitionAlpha += transitionSpeed * deltaTime;
@@ -1412,15 +1404,16 @@ function drawStyledBackground(style) {
       break;
       
     case 'sketch':
-      // Hand-drawn paper texture
+      // Hand-drawn paper texture (static)
       ctx.fillStyle = '#f5f5dc'; // Beige paper color
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       
-      // Add paper texture (random dots)
+      // Add paper texture (static pattern)
       ctx.fillStyle = 'rgba(0, 0, 0, 0.03)';
+      // Use deterministic pattern instead of random
       for (let i = 0; i < 200; i++) {
-        const x = Math.random() * canvas.width;
-        const y = Math.random() * canvas.height;
+        const x = (i * 37) % canvas.width;
+        const y = (i * 53) % canvas.height;
         ctx.fillRect(x, y, 2, 2);
       }
       break;
@@ -1444,16 +1437,13 @@ function drawStyledBackground(style) {
       break;
       
     case 'surreal':
-      // Abstract/surreal - shifting colors
-      const time = Date.now() / 1000;
+      // Abstract/surreal - static gradient colors
       const surrealGradient = ctx.createRadialGradient(
         canvas.width/2, canvas.height/2, 0,
         canvas.width/2, canvas.height/2, canvas.width
       );
-      const hue1 = (Math.sin(time * 0.5) * 30 + 220) % 360;
-      const hue2 = (Math.sin(time * 0.3) * 30 + 280) % 360;
-      surrealGradient.addColorStop(0, `hsl(${hue1}, 40%, 15%)`);
-      surrealGradient.addColorStop(1, `hsl(${hue2}, 40%, 10%)`);
+      surrealGradient.addColorStop(0, 'hsl(240, 40%, 15%)');
+      surrealGradient.addColorStop(1, 'hsl(280, 40%, 10%)');
       ctx.fillStyle = surrealGradient;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       break;
@@ -1483,22 +1473,16 @@ function drawStyledPlatform(x, y, width, height, style, isFake = false) {
       break;
       
     case 'sketch':
-      // Hand-drawn wobbly lines
+      // Hand-drawn style (static, no wobble)
       ctx.fillStyle = '#2a2a2a';
       ctx.fillRect(x, y, width, height);
       
-      // Sketchy outline (multiple lines for hand-drawn effect)
+      // Sketchy outline (multiple lines for hand-drawn effect) - static
       ctx.strokeStyle = '#000000';
       ctx.lineWidth = 2;
       for (let i = 0; i < 3; i++) {
-        const wobble = Math.sin(sketchWobble + x + y + i) * 2;
-        ctx.beginPath();
-        ctx.moveTo(x + wobble, y);
-        ctx.lineTo(x + width + wobble, y);
-        ctx.lineTo(x + width, y + height + wobble);
-        ctx.lineTo(x, y + height);
-        ctx.closePath();
-        ctx.stroke();
+        const offset = i * 0.5; // Small static offset, not animated
+        ctx.strokeRect(x + offset, y + offset, width, height);
       }
       
       // Crosshatch shading
@@ -1513,42 +1497,35 @@ function drawStyledPlatform(x, y, width, height, style, isFake = false) {
       break;
       
     case 'glitch':
-      // Digital corruption with offset
-      const offset = isFake ? glitchOffset : { x: 0, y: 0 };
+      // Digital corruption (static blocks with RGB split effect)
+      // RGB split effect - subtle, no offset
+      ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+      ctx.fillRect(x - 2, y, width, height);
+      ctx.fillStyle = 'rgba(0, 255, 0, 0.3)';
+      ctx.fillRect(x, y, width, height);
+      ctx.fillStyle = 'rgba(0, 100, 255, 0.3)';
+      ctx.fillRect(x + 2, y, width, height);
       
-      // RGB split effect
-      ctx.fillStyle = 'rgba(255, 0, 0, 0.7)';
-      ctx.fillRect(x + offset.x - 2, y + offset.y, width, height);
-      ctx.fillStyle = 'rgba(0, 255, 0, 0.7)';
-      ctx.fillRect(x + offset.x, y + offset.y, width, height);
-      ctx.fillStyle = 'rgba(0, 100, 255, 0.7)';
-      ctx.fillRect(x + offset.x + 2, y + offset.y, width, height);
-      
-      // Main platform
+      // Main platform (different color for fake blocks)
       ctx.fillStyle = isFake ? '#ff0088' : '#00ff88';
       ctx.fillRect(x, y, width, height);
       
       // Glitch outline
       ctx.strokeStyle = isFake ? '#ffff00' : '#00ffff';
       ctx.lineWidth = 2;
-      ctx.strokeRect(x + offset.x, y + offset.y, width, height);
+      ctx.strokeRect(x, y, width, height);
       break;
       
     case 'surreal':
-      // Abstract flowing shapes
-      const time = Date.now() / 1000;
-      const hue = (Math.sin(time + x / 100) * 60 + 180) % 360;
+      // Abstract flowing colors (static)
+      const hue = ((x + y) / 10 % 360); // Position-based hue, not time-based
       ctx.fillStyle = `hsl(${hue}, 60%, 40%)`;
       
-      // Wavy rectangle
-      ctx.save();
-      ctx.translate(x + width/2, y + height/2);
-      ctx.rotate(Math.sin(time + x / 200) * 0.1);
-      ctx.fillRect(-width/2, -height/2, width, height);
+      // Static rectangle with position-based colors
+      ctx.fillRect(x, y, width, height);
       ctx.strokeStyle = `hsl(${hue + 30}, 80%, 60%)`;
       ctx.lineWidth = 3;
-      ctx.strokeRect(-width/2, -height/2, width, height);
-      ctx.restore();
+      ctx.strokeRect(x, y, width, height);
       break;
       
     default:
@@ -1589,19 +1566,18 @@ function drawStyledSpike(spike, style) {
       break;
       
     case 'sketch':
-      // Hand-drawn sketchy spikes
+      // Hand-drawn sketchy spikes (static)
       ctx.fillStyle = spike.moving ? '#ff0000' : '#dd0000';
       
-      // Wobbly triangle
+      // Static triangle
       ctx.beginPath();
-      const wobble = Math.sin(sketchWobble * 2);
-      ctx.moveTo(x + width/2 + wobble, y);
-      ctx.lineTo(x + width + wobble, y + height);
-      ctx.lineTo(x - wobble, y + height);
+      ctx.moveTo(x + width/2, y);
+      ctx.lineTo(x + width, y + height);
+      ctx.lineTo(x, y + height);
       ctx.closePath();
       ctx.fill();
       
-      // Multiple sketch lines
+      // Multiple sketch lines for hand-drawn effect
       ctx.strokeStyle = '#000000';
       ctx.lineWidth = 2;
       for (let i = 0; i < 2; i++) {
@@ -1610,10 +1586,10 @@ function drawStyledSpike(spike, style) {
       break;
       
     case 'glitch':
-      // Glitchy pixelated spikes
+      // Glitchy pixelated spikes (static)
       ctx.fillStyle = spike.moving ? '#ff0000' : '#dd0000';
       
-      // Draw with glitch offset
+      // Draw pixelated spike (no offset animation)
       const pixelSize = 4;
       for (let py = y; py < y + height; py += pixelSize) {
         for (let px = x; px < x + width; px += pixelSize) {
@@ -1623,30 +1599,38 @@ function drawStyledSpike(spike, style) {
           const inTriangle = relY > (1 - Math.abs(relX * 2 - 1));
           
           if (inTriangle) {
-            const offset = Math.random() > 0.9 ? glitchOffset.x : 0;
-            ctx.fillRect(px + offset, py, pixelSize, pixelSize);
+            ctx.fillRect(px, py, pixelSize, pixelSize);
           }
         }
       }
+      
+      // Sharp outline
+      ctx.strokeStyle = spike.moving ? '#ff4444' : '#cc0000';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x + width/2, y);
+      ctx.lineTo(x + width, y + height);
+      ctx.lineTo(x, y + height);
+      ctx.closePath();
+      ctx.stroke();
       break;
       
     case 'surreal':
-      // Abstract danger shapes
-      const time = Date.now() / 1000;
-      ctx.fillStyle = `hsl(${Math.sin(time * 2) * 30 + 350}, 100%, 50%)`;
+      // Abstract danger shapes (static colors)
+      ctx.fillStyle = 'hsl(350, 100%, 50%)'; // Static red hue
       
-      // Pulsating triangle
-      ctx.save();
-      ctx.translate(x + width/2, y + height/2);
-      const scale = 1 + Math.sin(time * 4) * 0.1;
-      ctx.scale(scale, scale);
+      // Static triangle
       ctx.beginPath();
-      ctx.moveTo(0, -height/2);
-      ctx.lineTo(width/2, height/2);
-      ctx.lineTo(-width/2, height/2);
+      ctx.moveTo(x + width/2, y);
+      ctx.lineTo(x + width, y + height);
+      ctx.lineTo(x, y + height);
       ctx.closePath();
       ctx.fill();
-      ctx.restore();
+      
+      // Sharp outline
+      ctx.strokeStyle = 'hsl(350, 100%, 70%)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
       break;
       
     default:
@@ -1688,41 +1672,40 @@ function drawStyledPlayer(x, y, width, height, style) {
       break;
       
     case 'sketch':
-      // Sketchy player
+      // Sketchy player (static)
       ctx.fillStyle = playerColor;
       ctx.fillRect(x, y, width, height);
       
-      // Multiple sketch outlines
+      // Multiple sketch outlines - static offset
       ctx.strokeStyle = '#000000';
       ctx.lineWidth = 2;
       for (let i = 0; i < 3; i++) {
-        const wobble = Math.sin(sketchWobble + i) * 1.5;
-        ctx.strokeRect(x + wobble, y + wobble, width, height);
+        const offset = i * 0.5; // Small static offset
+        ctx.strokeRect(x + offset, y + offset, width, height);
       }
       break;
       
     case 'glitch':
-      // Glitchy player with RGB split
-      ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
-      ctx.fillRect(x + glitchOffset.x - 2, y, width, height);
-      ctx.fillStyle = 'rgba(0, 255, 0, 0.5)';
-      ctx.fillRect(x, y + glitchOffset.y, width, height);
+      // Glitchy player with subtle RGB split (no position offset)
+      ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+      ctx.fillRect(x - 2, y, width, height);
+      ctx.fillStyle = 'rgba(0, 255, 0, 0.3)';
+      ctx.fillRect(x, y, width, height);
+      ctx.fillStyle = 'rgba(0, 100, 255, 0.3)';
+      ctx.fillRect(x + 2, y, width, height);
+      
+      // Main player
       ctx.fillStyle = playerColor;
       ctx.fillRect(x, y, width, height);
       break;
       
     case 'surreal':
-      // Abstract morphing player
-      const time = Date.now() / 1000;
-      ctx.save();
-      ctx.translate(x + width/2, y + height/2);
-      ctx.rotate(Math.sin(time * 2) * 0.1);
+      // Abstract player (static, no rotation)
       ctx.fillStyle = playerColor;
-      ctx.fillRect(-width/2, -height/2, width, height);
+      ctx.fillRect(x, y, width, height);
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2;
-      ctx.strokeRect(-width/2, -height/2, width, height);
-      ctx.restore();
+      ctx.strokeRect(x, y, width, height);
       break;
       
     default:
