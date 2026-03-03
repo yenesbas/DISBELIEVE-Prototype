@@ -1966,14 +1966,9 @@ function render() {
     drawPlayerTrail();
   }
 
-  // Draw player
+  // Draw player (always default style, doesn't change with chapters)
   if (!isDead && (gameState === 'playing' || gameState === 'paused')) {
-    // Use styled player for special visual styles
-    if (visualStyle !== 'default') {
-      drawStyledPlayer(player.x, player.y, player.width, player.height, visualStyle);
-    } else {
-      drawPlayer(player.x, player.y, player.width, player.height);
-    }
+    drawPlayer(player.x, player.y, player.width, player.height);
     
     // Developer mode indicator
     if (DEVELOPER_MODE) {
