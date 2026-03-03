@@ -29,6 +29,7 @@ const chapters = [
   {
     name: "Chapter 1: First Deceptions",
     description: "Learn to question what you see",
+    visualStyle: "default", // Minimalist geometric
     levels: [
       // Level 1 - Introduction (spike moves 2 tiles, default trigger)
       {
@@ -228,6 +229,7 @@ const chapters = [
   {
     name: "Chapter 2: Advanced Illusions",
     description: "Master the art of disbelief",
+    visualStyle: "neon", // Neon glow aesthetic
     // Gravity zone configuration for all levels in this chapter
     gravityZones: [
       {
@@ -365,6 +367,177 @@ const chapters = [
       ],
       spikeTriggers: [-2, -3],
       spikeTriggerLengths: [200, 250]
+    }
+  },
+  // Chapter 3: Hand-Drawn Sketch World
+  {
+    name: "Chapter 3: Sketched Reality",
+    description: "Where drawings come to life",
+    visualStyle: "sketch", // Used for rendering
+    levels: [
+      {
+        name: "Level 1: Pencil Marks",
+        map: [
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          ".S.......1..........",
+          "####...####.........",
+          "..........####......",
+          ".............####...",
+          "................##D.",
+          "..................##"
+        ],
+        spikeTriggers: [-2]
+      },
+      {
+        name: "Level 2: Erased Path",
+        map: [
+          "....................",
+          "....................",
+          ".S..................",
+          "###.....FF..........",
+          "...###..##.###......",
+          "..........I...###...",
+          "..........I.........",
+          "..........I.......D.",
+          "..........###########"
+        ]
+      }
+    ],
+    bonusLevel: {
+      name: "Bonus: Sketch Master",
+      description: "Navigate the artist's nightmare",
+      map: [
+        "....................",
+        ".....2...............",
+        "#S######F##########.",
+        ".#......F...#.....#.",
+        "..F##F..I...#...2.#.",
+        "..#..#..#.....#.....",
+        "..#..#..#.....#...#.",
+        "F############.#####.",
+        "............#.......",
+        "............F.....D.",
+        "#.F..#..F..#########"
+      ],
+      spikeTriggers: [-2, -3]
+    }
+  },
+  // Chapter 4: Glitch/Digital Corruption
+  {
+    name: "Chapter 4: System Error",
+    description: "Reality.exe has stopped working",
+    visualStyle: "glitch", // Used for rendering
+    levels: [
+      {
+        name: "Level 1: Boot Sequence",
+        map: [
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          ".S..................",
+          "####................",
+          "....###.............",
+          ".......###..........",
+          "..........###.......",
+          ".............###...D",
+          "................####"
+        ]
+      },
+      {
+        name: "Level 2: Memory Leak",
+        map: [
+          "....................",
+          "....................",
+          "....................",
+          ".S...1..............",
+          "#####.########......",
+          ".........F...###....",
+          ".........F......##..",
+          ".........2........D.",
+          "####################"
+        ],
+        spikeTriggers: [-1, -3]
+      }
+    ],
+    bonusLevel: {
+      name: "Bonus: Kernel Panic",
+      description: "Survive the system crash",
+      map: [
+        "....................",
+        "......2......3......",
+        "#S######F##########.",
+        ".#......I...#...1.#.",
+        "..FI.F..I...#.....#.",
+        "..#..#..#.....#.....",
+        "..#..#..#.4...#...#.",
+        "F############.#####.",
+        "............#.......",
+        "............F.....D.",
+        "#.F..#..F..#########"
+      ],
+      spikeTriggers: [-2, -3, -1, -4]
+    }
+  },
+  // Chapter 5: Abstract/Surreal
+  {
+    name: "Chapter 5: Beyond Reality",
+    description: "Where logic fear to tread",
+    visualStyle: "surreal", // Used for rendering
+    levels: [
+      {
+        name: "Level 1: First Dream",
+        map: [
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          ".S..................",
+          "##..................",
+          "..##................",
+          "....##..............",
+          "......##............",
+          "........##..........",
+          "..........##......D.",
+          "............########"
+        ]
+      },
+      {
+        name: "Level 2: Floating Islands",
+        map: [
+          "........D...........",
+          "........#...........",
+          "....................",
+          ".......###..........",
+          "....................",
+          "....#####...........",
+          "....................",
+          "..#######...........",
+          ".S..................",
+          "##.................."
+        ]
+      }
+    ],
+    bonusLevel: {
+      name: "Bonus: Dreamscape",
+      description: "Lost in the abstract void",
+      map: [
+        "..........D.........",
+        "..........#.........",
+        "....................",
+        ".......2.###.3......",
+        ".....######I########",
+        "....#.....I.I......#",
+        "...#......I.I.......",
+        "..#.......I.I.2.....",
+        ".#........###.######",
+        "#S.................."
+      ],
+      spikeTriggers: [-2, -3, -1]
     }
   }
 ];
