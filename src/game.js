@@ -203,6 +203,33 @@ function getCurrentLevelInfo() {
   return null;
 }
 
+// Visual Style System - Each chapter has unique rendering style
+function getCurrentVisualStyle() {
+  const chapterInfo = getCurrentChapterInfo();
+  return chapterInfo?.visualStyle || 'default';
+}
+
+// Glitch effect state
+let glitchOffset = { x: 0, y: 0 };
+let glitchTimer = 0;
+let nextGlitchTime = Math.random() * 2;
+
+function updateGlitchEffect(deltaTime) {
+  glitchTimer += deltaTime;
+  if (glitchTimer >= nextGlitchTime) {
+    glitchOffset.x = (Math.random() - 0.5) * 8;
+    glitchOffset.y = (Math.random() - 0.5) * 8;
+    glitchTimer = 0;
+    nextGlitchTime = 0.05 + Math.random() * 0.15;
+  }
+}
+
+// Sketch wobble effect
+let sketchWobble = 0;
+function updateSketchWobble(deltaTime) {
+  sketchWobble += deltaTime * 2;
+}
+
 // Game state
 let gameState = 'menu'; // 'menu', 'settings', 'chapterSelect', 'levelSelect', 'playing', 'levelComplete', 'paused'
 let previousGameState = null; // Store previous state to return to after settings
@@ -793,6 +820,16 @@ function resetPlayer() {
 
 // Update game state
 function update(deltaTime) {
+  // Update visual effects
+  if (gameState === 'playing' || gameState === 'paused') {
+    const visualStyle = getCurrentVisualStyle();
+    if (visualStyle === 'glitch') {
+      updateGlitchEffect(deltaTime);
+    } else if (visualStyle === 'sketch') {
+      updateSketchWobble(deltaTime);
+    }
+  }
+
   // Handle transitions
   if (transitionState === 'fadeOut') {
     transitionAlpha += transitionSpeed * deltaTime;
@@ -1332,6 +1369,373 @@ function updateStats() {
 
 // Update trigger info display below canvas
 function updateTriggerInfo() {
+  // DEVELOPER FEATURE: Show trigger zone info for level designers
+  if (!ENABLE_DEBUG_FEATURES || !DEBUG_MODE) {
+    document.getElementById('triggerInfo').textContent = '';
+    return;
+  }
+  const lines = spikes.map((s, i) => 
+    `Spike ${i+1}: triggerX=${s.triggerX.toFixed(0)} triggerLen=${s.triggerLength === null ? 'full' : s.triggerLength.toFixed(0)}px triggerOffset=${s.triggerOffset.toFixed(0)}`
+  );
+  document.getElementById('triggerInfo').textContent = lines.join(' | ');
+}
+
+// ===== VISUAL STYLE RENDERING SYSTEM =====
+// Each chapter has its own unique visual style
+
+// Helper: Draw background based on visual style
+function drawStyledBackground(style) {
+  switch(style) {
+    case 'neon':
+      // Neon glow - dark background with gradient
+      const neonGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      neonGradient.addColorStop(0, '#0a0a1a');
+      neonGradient.addColorStop(1, '#1a0a2a');
+      ctx.fillStyle = neonGradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Add subtle grid
+      ctx.strokeStyle = 'rgba(100, 100, 255, 0.1)';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < canvas.width; x += 40) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+      for (let y = 0; y < canvas.height; y += 40) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+      break;
+      
+    case 'sketch':
+      // Hand-drawn paper texture
+      ctx.fillStyle = '#f5f5dc'; // Beige paper color
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Add paper texture (random dots)
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.03)';
+      for (let i = 0; i < 200; i++) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        ctx.fillRect(x, y, 2, 2);
+      }
+      break;
+      
+    case 'glitch':
+      // Digital corruption
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Random scan lines
+      ctx.strokeStyle = 'rgba(0, 255, 100, 0.1)';
+      ctx.lineWidth = 1;
+      for (let y = 0; y < canvas.height; y += 4) {
+        if (Math.random() > 0.5) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(canvas.width, y);
+          ctx.stroke();
+        }
+      }
+      break;
+      
+    case 'surreal':
+      // Abstract/surreal - shifting colors
+      const time = Date.now() / 1000;
+      const surrealGradient = ctx.createRadialGradient(
+        canvas.width/2, canvas.height/2, 0,
+        canvas.width/2, canvas.height/2, canvas.width
+      );
+      const hue1 = (Math.sin(time * 0.5) * 30 + 220) % 360;
+      const hue2 = (Math.sin(time * 0.3) * 30 + 280) % 360;
+      surrealGradient.addColorStop(0, `hsl(${hue1}, 40%, 15%)`);
+      surrealGradient.addColorStop(1, `hsl(${hue2}, 40%, 10%)`);
+      ctx.fillStyle = surrealGradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      break;
+      
+    default:
+      // Default minimalist style
+      ctx.fillStyle = DEVELOPER_MODE ? '#1a1a3a' : '#2a2a2a';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+}
+
+// Helper: Draw platform based on visual style
+function drawStyledPlatform(x, y, width, height, style, isFake = false) {
+  switch(style) {
+    case 'neon':
+      // Neon glow effect
+      ctx.shadowBlur = 15;
+      ctx.shadowColor = isFake ? '#ff00ff' : '#00ffff';
+      ctx.fillStyle = isFake ? '#660066' : '#006666';
+      ctx.fillRect(x, y, width, height);
+      
+      // Bright outline
+      ctx.strokeStyle = isFake ? '#ff00ff' : '#00ffff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, width, height);
+      ctx.shadowBlur = 0;
+      break;
+      
+    case 'sketch':
+      // Hand-drawn wobbly lines
+      ctx.fillStyle = '#2a2a2a';
+      ctx.fillRect(x, y, width, height);
+      
+      // Sketchy outline (multiple lines for hand-drawn effect)
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 3; i++) {
+        const wobble = Math.sin(sketchWobble + x + y + i) * 2;
+        ctx.beginPath();
+        ctx.moveTo(x + wobble, y);
+        ctx.lineTo(x + width + wobble, y);
+        ctx.lineTo(x + width, y + height + wobble);
+        ctx.lineTo(x, y + height);
+        ctx.closePath();
+        ctx.stroke();
+      }
+      
+      // Crosshatch shading
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < width; i += 8) {
+        ctx.beginPath();
+        ctx.moveTo(x + i, y);
+        ctx.lineTo(x + i, y + height);
+        ctx.stroke();
+      }
+      break;
+      
+    case 'glitch':
+      // Digital corruption with offset
+      const offset = isFake ? glitchOffset : { x: 0, y: 0 };
+      
+      // RGB split effect
+      ctx.fillStyle = 'rgba(255, 0, 0, 0.7)';
+      ctx.fillRect(x + offset.x - 2, y + offset.y, width, height);
+      ctx.fillStyle = 'rgba(0, 255, 0, 0.7)';
+      ctx.fillRect(x + offset.x, y + offset.y, width, height);
+      ctx.fillStyle = 'rgba(0, 100, 255, 0.7)';
+      ctx.fillRect(x + offset.x + 2, y + offset.y, width, height);
+      
+      // Main platform
+      ctx.fillStyle = isFake ? '#ff0088' : '#00ff88';
+      ctx.fillRect(x, y, width, height);
+      
+      // Glitch outline
+      ctx.strokeStyle = isFake ? '#ffff00' : '#00ffff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x + offset.x, y + offset.y, width, height);
+      break;
+      
+    case 'surreal':
+      // Abstract flowing shapes
+      const time = Date.now() / 1000;
+      const hue = (Math.sin(time + x / 100) * 60 + 180) % 360;
+      ctx.fillStyle = `hsl(${hue}, 60%, 40%)`;
+      
+      // Wavy rectangle
+      ctx.save();
+      ctx.translate(x + width/2, y + height/2);
+      ctx.rotate(Math.sin(time + x / 200) * 0.1);
+      ctx.fillRect(-width/2, -height/2, width, height);
+      ctx.strokeStyle = `hsl(${hue + 30}, 80%, 60%)`;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(-width/2, -height/2, width, height);
+      ctx.restore();
+      break;
+      
+    default:
+      // Default minimalist style
+      ctx.fillStyle = '#666';
+      ctx.fillRect(x, y, width, height);
+      ctx.strokeStyle = '#555';
+      ctx.strokeRect(x, y, width, height);
+  }
+}
+
+// Helper: Draw spike based on visual style
+function drawStyledSpike(spike, style) {
+  const x = spike.x;
+  const y = spike.y;
+  const width = spike.width;
+  const height = spike.height;
+  
+  switch(style) {
+    case 'neon':
+      // Neon triangular spikes with glow
+      ctx.shadowBlur = 20;
+      ctx.shadowColor = '#ff0055';
+      ctx.fillStyle = spike.moving ? '#ff0055' : '#dd0044';
+      
+      // Triangle
+      ctx.beginPath();
+      ctx.moveTo(x + width/2, y);
+      ctx.lineTo(x + width, y + height);
+      ctx.lineTo(x, y + height);
+      ctx.closePath();
+      ctx.fill();
+      
+      ctx.strokeStyle = '#ff44aa';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      break;
+      
+    case 'sketch':
+      // Hand-drawn sketchy spikes
+      ctx.fillStyle = spike.moving ? '#ff0000' : '#dd0000';
+      
+      // Wobbly triangle
+      ctx.beginPath();
+      const wobble = Math.sin(sketchWobble * 2);
+      ctx.moveTo(x + width/2 + wobble, y);
+      ctx.lineTo(x + width + wobble, y + height);
+      ctx.lineTo(x - wobble, y + height);
+      ctx.closePath();
+      ctx.fill();
+      
+      // Multiple sketch lines
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 2; i++) {
+        ctx.stroke();
+      }
+      break;
+      
+    case 'glitch':
+      // Glitchy pixelated spikes
+      ctx.fillStyle = spike.moving ? '#ff0000' : '#dd0000';
+      
+      // Draw with glitch offset
+      const pixelSize = 4;
+      for (let py = y; py < y + height; py += pixelSize) {
+        for (let px = x; px < x + width; px += pixelSize) {
+          // Check if pixel is inside triangle
+          const relY = (py - y) / height;
+          const relX = (px - x) / width;
+          const inTriangle = relY > (1 - Math.abs(relX * 2 - 1));
+          
+          if (inTriangle) {
+            const offset = Math.random() > 0.9 ? glitchOffset.x : 0;
+            ctx.fillRect(px + offset, py, pixelSize, pixelSize);
+          }
+        }
+      }
+      break;
+      
+    case 'surreal':
+      // Abstract danger shapes
+      const time = Date.now() / 1000;
+      ctx.fillStyle = `hsl(${Math.sin(time * 2) * 30 + 350}, 100%, 50%)`;
+      
+      // Pulsating triangle
+      ctx.save();
+      ctx.translate(x + width/2, y + height/2);
+      const scale = 1 + Math.sin(time * 4) * 0.1;
+      ctx.scale(scale, scale);
+      ctx.beginPath();
+      ctx.moveTo(0, -height/2);
+      ctx.lineTo(width/2, height/2);
+      ctx.lineTo(-width/2, height/2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      break;
+      
+    default:
+      // Default spike rendering (existing code)
+      ctx.fillStyle = spike.moving ? '#ff0000' : '#dd0000';
+      let spikeSplits = 10;
+      ctx.beginPath();
+      ctx.moveTo(x + (width / spikeSplits) * 2, y);
+      for (let i = 1; i < spikeSplits - 1; i = i + 2) {
+        ctx.lineTo(x + (i * width) / spikeSplits, y + (height/5) * 3);
+        ctx.lineTo(x + ((i+1) * width) / spikeSplits, y);
+      }
+      ctx.lineTo(x + width, y + height);
+      ctx.lineTo(x, y + height);
+      ctx.closePath();
+      ctx.fill();
+      
+      ctx.strokeStyle = '#aa0000';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+  }
+}
+
+// Helper: Draw player based on visual style
+function drawStyledPlayer(x, y, width, height, style) {
+  switch(style) {
+    case 'neon':
+      // Glowing player
+      ctx.shadowBlur = 20;
+      ctx.shadowColor = playerColor;
+      ctx.fillStyle = playerColor;
+      ctx.fillRect(x, y, width, height);
+      ctx.shadowBlur = 0;
+      
+      // Bright outline
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, width, height);
+      break;
+      
+    case 'sketch':
+      // Sketchy player
+      ctx.fillStyle = playerColor;
+      ctx.fillRect(x, y, width, height);
+      
+      // Multiple sketch outlines
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 3; i++) {
+        const wobble = Math.sin(sketchWobble + i) * 1.5;
+        ctx.strokeRect(x + wobble, y + wobble, width, height);
+      }
+      break;
+      
+    case 'glitch':
+      // Glitchy player with RGB split
+      ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+      ctx.fillRect(x + glitchOffset.x - 2, y, width, height);
+      ctx.fillStyle = 'rgba(0, 255, 0, 0.5)';
+      ctx.fillRect(x, y + glitchOffset.y, width, height);
+      ctx.fillStyle = playerColor;
+      ctx.fillRect(x, y, width, height);
+      break;
+      
+    case 'surreal':
+      // Abstract morphing player
+      const time = Date.now() / 1000;
+      ctx.save();
+      ctx.translate(x + width/2, y + height/2);
+      ctx.rotate(Math.sin(time * 2) * 0.1);
+      ctx.fillStyle = playerColor;
+      ctx.fillRect(-width/2, -height/2, width, height);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(-width/2, -height/2, width, height);
+      ctx.restore();
+      break;
+      
+    default:
+      // Default player rendering
+      ctx.fillStyle = playerColor;
+      ctx.fillRect(x, y, width, height);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, width, height);
+  }
+}
+
+function updateTriggerInfo() {
   if (!ENABLE_DEBUG_FEATURES) return; // Exit if debug features disabled
   
   const triggerInfoElement = document.getElementById('triggerInfo');
@@ -1353,9 +1757,13 @@ function updateTriggerInfo() {
 
 // Render game
 function render() {
-  // Clear screen - use special color in developer mode
-  ctx.fillStyle = DEVELOPER_MODE ? '#1a1a3a' : '#2a2a2a';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // Get current visual style
+  const visualStyle = (gameState === 'playing' || gameState === 'paused' || gameState === 'levelComplete') 
+    ? getCurrentVisualStyle() 
+    : 'default';
+
+  // Clear screen with styled background
+  drawStyledBackground(visualStyle);
 
   // Menu screen
   if (gameState === 'menu') {
@@ -1395,14 +1803,9 @@ function render() {
   // Don't return early for paused - we need to draw the game first
   // Then we'll draw the pause menu overlay on top
 
-  // Draw platforms (solid blocks)
-  ctx.fillStyle = '#666';
+  // Draw platforms (solid blocks) with visual style
   platforms.forEach(platform => {
-    ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
-
-    // Add some texture
-    ctx.strokeStyle = '#555';
-    ctx.strokeRect(platform.x, platform.y, platform.width, platform.height);
+    drawStyledPlatform(platform.x, platform.y, platform.width, platform.height, visualStyle, false);
   });
 
   // Draw invisible platforms (only visible in debug mode)
@@ -1425,14 +1828,9 @@ function render() {
     ctx.lineWidth = 1; // Reset line width
   }
 
-  // Draw fake blocks (visually identical to solid platforms so player cannot tell)
+  // Draw fake blocks with visual style (may look different from real platforms in some styles)
   fakeBlocks.forEach(fakeBlock => {
-    // Use the exact same fill and outline as solid platforms
-    ctx.fillStyle = '#666';
-    ctx.fillRect(fakeBlock.x, fakeBlock.y, fakeBlock.width, fakeBlock.height);
-
-    ctx.strokeStyle = '#555';
-    ctx.strokeRect(fakeBlock.x, fakeBlock.y, fakeBlock.width, fakeBlock.height);
+    drawStyledPlatform(fakeBlock.x, fakeBlock.y, fakeBlock.width, fakeBlock.height, visualStyle, true);
   });
 
   // Draw gravity zones
@@ -1549,7 +1947,7 @@ function render() {
     ctx.fillRect(door.x + door.width * 0.7, door.y + door.height * 0.5, 6, 6);
   }
 
-  // Draw spikes (red triangles)
+  // Draw spikes with visual style
   spikes.forEach(spike => {
     // Draw invisible trigger line (only if DEBUG_MODE is enabled)
     if (DEBUG_MODE && !spike.moved && !spike.triggered) {
@@ -1576,31 +1974,8 @@ function render() {
       ctx.fillText(`-${spike.triggerOffset} [${lengthLabel}]`, spike.triggerX - 15, spike.y - 5);
     }
 
-    ctx.fillStyle = spike.moving ? '#ff0000' : '#dd0000';
-
-    // Draw triangle pointing up
-    let spikeSplits = 10;
-    ctx.beginPath();
-    ctx.moveTo(spike.x + (spike.width / spikeSplits) * 2 , spike.y); // top
-    for (let i = 1; i < spikeSplits - 1; i = i + 2) {
-        ctx.lineTo(spike.x + (i * spike.width) / spikeSplits, spike.y + (spike.height/5) * 3); // middle points
-        ctx.lineTo(spike.x + ((i+1) * spike.width) / spikeSplits, spike.y); // top points
-    }
-    ctx.lineTo(spike.x + spike.width, spike.y + spike.height); // bottom right
-    ctx.lineTo(spike.x, spike.y + spike.height); // bottom left
-    ctx.closePath();
-    ctx.fill();
-
-    // Outline
-    ctx.strokeStyle = '#aa0000';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // Show warning when spike is triggered (using spike's custom moveDistance)
-    if (spike.moving) {
-      //ctx.fillStyle = 'rgba(255, 0, 0, 0)';
-      //ctx.fillRect(spike.originalX, spike.y - 10, spike.moveDistance + spike.width, spike.height + 10);
-    }
+    // Draw spike with visual style
+    drawStyledSpike(spike, visualStyle);
   });
 
   // Draw player trail effect (before player so it appears behind)
@@ -1610,7 +1985,12 @@ function render() {
 
   // Draw player
   if (!isDead && (gameState === 'playing' || gameState === 'paused')) {
-    drawPlayer(player.x, player.y, player.width, player.height);
+    // Use styled player for special visual styles
+    if (visualStyle !== 'default') {
+      drawStyledPlayer(player.x, player.y, player.width, player.height, visualStyle);
+    } else {
+      drawPlayer(player.x, player.y, player.width, player.height);
+    }
     
     // Developer mode indicator
     if (DEVELOPER_MODE) {
