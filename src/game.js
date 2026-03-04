@@ -1457,16 +1457,19 @@ function drawStyledBackground(style) {
 
 // Helper: Draw platform based on visual style
 function drawStyledPlatform(x, y, width, height, style, isFake = false) {
+  // NOTE: Fake blocks MUST look identical to real blocks - that's the deception!
+  // The isFake parameter is kept for potential future use but NOT used for rendering
+  
   switch(style) {
     case 'neon':
-      // Neon glow effect
+      // Neon glow effect (same for all blocks)
       ctx.shadowBlur = 15;
-      ctx.shadowColor = isFake ? '#ff00ff' : '#00ffff';
-      ctx.fillStyle = isFake ? '#660066' : '#006666';
+      ctx.shadowColor = '#00ffff';
+      ctx.fillStyle = '#006666';
       ctx.fillRect(x, y, width, height);
       
       // Bright outline
-      ctx.strokeStyle = isFake ? '#ff00ff' : '#00ffff';
+      ctx.strokeStyle = '#00ffff';
       ctx.lineWidth = 2;
       ctx.strokeRect(x, y, width, height);
       ctx.shadowBlur = 0;
@@ -1506,12 +1509,12 @@ function drawStyledPlatform(x, y, width, height, style, isFake = false) {
       ctx.fillStyle = 'rgba(0, 100, 255, 0.3)';
       ctx.fillRect(x + 2, y, width, height);
       
-      // Main platform (different color for fake blocks)
-      ctx.fillStyle = isFake ? '#ff0088' : '#00ff88';
+      // Main platform (same color for all blocks)
+      ctx.fillStyle = '#00ff88';
       ctx.fillRect(x, y, width, height);
       
       // Glitch outline
-      ctx.strokeStyle = isFake ? '#ffff00' : '#00ffff';
+      ctx.strokeStyle = '#00ffff';
       ctx.lineWidth = 2;
       ctx.strokeRect(x, y, width, height);
       break;
