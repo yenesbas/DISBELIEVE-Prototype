@@ -1,245 +1,146 @@
-// Chapter 2: Gravity Deceptions
-// Gravity zones and fake blocks - NO SPIKES
+// Chapter 2: Advanced Illusions
+// Gravity zones with detailed visual configuration
 
 const chapter2 = {
-  name: "Chapter 2: Gravity Deceptions",
-  description: "Question your sense of direction",
-  visualStyle: "neon", // Neon glow aesthetic
-  levels: [
-    // Level 1 - Introduction to gravity zones
-    {
-      name: "Level 1: Flip",
-      map: [
-        "....................",
-        "....................",
-        "....................",
-        "####################",
-        "....................",
-        "....................",
-        "....................",
-        ".S................D.",
-        "####################"
-      ],
-      gravityZones: [
-        { x: 5, y: 0, width: 10, height: 4, direction: 'up' }
-      ]
-    },
-    // Level 2 - Multiple gravity zones
-    {
-      name: "Level 2: Up and Down",
-      map: [
-        "....................",
-        "....................",
-        "....................",
-        "####################",
-        "....................",
-        "....................",
-        "....................",
-        ".S................D.",
-        "####################"
-      ],
-      gravityZones: [
-        { x: 3, y: 0, width: 4, height: 4, direction: 'up' },
-        { x: 10, y: 4, width: 4, height: 4, direction: 'down' }
-      ]
-    },
-    // Level 3 - Gravity + fake blocks introduction
-    {
-      name: "Level 3: False Path",
-      map: [
-        "....................",
-        "....................",
-        "....................",
-        "####################",
-        "....................",
-        "....................",
-        "#.................#.",
-        ".S.....FFFF.......D.",
-        "####################"
-      ],
-      gravityZones: [
-        { x: 5, y: 0, width: 10, height: 4, direction: 'up' }
-      ]
-    },
-    // Level 4 - Complex gravity + fake blocks
-    {
-      name: "Level 4: Deceptive Heights",
-      map: [
-        "....................",
-        "....................",
-        "............F.......",
-        "########...###.#####",
-        "....................",
-        "....................",
-        "....................",
-        ".S........FF......D.",
-        "####################"
-      ],
-      gravityZones: [
-        { x: 5, y: 0, width: 6, height: 4, direction: 'up' },
-        { x: 12, y: 4, width: 6, height: 4, direction: 'down' }
-      ]
-    },
-    // Level 5 - Multiple transitions
-    {
-      name: "Level 5: Zone Jumping",
-      map: [
-        "....................",
-        "....................",
-        "...........##..#....",
-        "##............##....",
-        "....................",
-        "....................",
-        "...........##.......",
-        ".S........F.......D.",
-        "####################"
-      ],
-      gravityZones: [
-        { x: 4, y: 0, width: 5, height: 4, direction: 'up' },
-        { x: 11, y: 0, width: 4, height: 4, direction: 'up' },
-        { x: 11, y: 4, width: 4, height: 4, direction: 'down' }
-      ]
-    },
-    // Level 6 - Narrow passages
-    {
-      name: "Level 6: Tight Spaces",
-      map: [
-        "....................",
-        "....................",
-        ".....#........#.....",
-        "#####F####..####....",
-        "....................",
-        "....................",
-        "...........##.......",
-        ".S..F.....FFF.....D.",
-        "####################"
-      ],
-      gravityZones: [
-        { x: 3, y: 0, width: 6, height: 4, direction: 'up' },
-        { x: 12, y: 0, width: 5, height: 4, direction: 'up' },
-        { x: 12, y: 4, width: 5, height: 4, direction: 'down' }
-      ]
-    },
-    // Level 7 - Timing and precision
-    {
-      name: "Level 7: Precision",
-      map: [
-        "....................",
-        "....................",
-        "........#..#...#....",
-        "####....#..#...#....",
-        "....................",
-        "....F..#..#...#.....",
-        "....F..#..#...#.....",
-        ".S.....#..#.......D.",
-        "####################"
-      ],
-      gravityZones: [
-        { x: 5, y: 0, width: 3, height: 4, direction: 'up' },
-        { x: 9, y: 0, width: 3, height: 4, direction: 'up' },
-        { x: 13, y: 0, width: 3, height: 4, direction: 'up' },
-        { x: 5, y: 4, width: 3, height: 4, direction: 'down' },
-        { x: 9, y: 4, width: 3, height: 4, direction: 'down' },
-        { x: 13, y: 4, width: 3, height: 4, direction: 'down' }
-      ]
-    },
-    // Level 8 - Maze-like with fake blocks
-    {
-      name: "Level 8: Gravity Maze",
-      map: [
-        "....................",
-        "....................",
-        ".......F#......#....",
-        "####...##......##...",
-        "....................",
-        ".......#......#.....",
-        "....F..##....##.....",
-        ".S.....F........#.D.",
-        "####################"
-      ],
-      gravityZones: [
-        { x: 5, y: 0, width: 4, height: 4, direction: 'up' },
-        { x: 11, y: 0, width: 4, height: 4, direction: 'up' },
-        { x: 5, y: 4, width: 4, height: 4, direction: 'down' },
-        { x: 11, y: 4, width: 4, height: 4, direction: 'down' }
-      ]
-    },
-    // Level 9 - Advanced deception
-    {
-      name: "Level 9: False Floors Everywhere",
-      map: [
-        "....................",
-        "....................",
-        "...#.....#....#.....",
-        "##F#.....#....#.....",
-        "....................",
-        "...F....#....#......",
-        "...#....F....F......",
-        ".S.......F.........D",
-        "####################"
-      ],
-      gravityZones: [
-        { x: 4, y: 0, width: 4, height: 4, direction: 'up' },
-        { x: 10, y: 0, width: 4, height: 4, direction: 'up' },
-        { x: 15, y: 0, width: 4, height: 4, direction: 'up' },
-        { x: 4, y: 4, width: 4, height: 4, direction: 'down' },
-        { x: 10, y: 4, width: 4, height: 4, direction: 'down' },
-        { x: 15, y: 4, width: 4, height: 4, direction: 'down' }
-      ]
-    },
-    // Level 10 - Chapter finale
-    {
-      name: "Level 10: Gravity Master",
-      map: [
-        "....................",
-        "....................",
-        "..#..#....#..#....#.",
-        "##F..#....F..#....F.",
-        "....................",
-        "..F..#....#..F....#.",
-        "..#..F....#..#....#.",
-        ".S.........F......D.",
-        "####################"
-      ],
-      gravityZones: [
-        { x: 3, y: 0, width: 3, height: 4, direction: 'up' },
-        { x: 8, y: 0, width: 3, height: 4, direction: 'up' },
-        { x: 13, y: 0, width: 3, height: 4, direction: 'up' },
-        { x: 17, y: 0, width: 3, height: 4, direction: 'up' },
-        { x: 3, y: 4, width: 3, height: 4, direction: 'down' },
-        { x: 8, y: 4, width: 3, height: 4, direction: 'down' },
-        { x: 13, y: 4, width: 3, height: 4, direction: 'down' },
-        { x: 17, y: 4, width: 3, height: 4, direction: 'down' }
-      ]
-    }
-  ],
-  bonusLevel: {
-    name: "Bonus: Gravity Chaos",
-    description: "Ultimate gravity zone mastery",
-    map: [
-      "....................",
-      "....................",
-      ".#.#.#.#.#.#.#.#.#..",
-      "FFFFFFFFFFF.#.#.#.#.",
-      "....................",
-      ".F.F.F.F.#.#.#.F.#..",
-      ".#.#.#.F.F.F.F.#.F..",
-      ".S.F.F.F.F.F.F.F..D.",
-      "####################"
-    ],
+    name: "Chapter 2: Advanced Illusions",
+    description: "Master the art of disbelief",
+    visualStyle: "neon", // Neon glow aesthetic
+    // Gravity zone configuration for all levels in this chapter
     gravityZones: [
-      { x: 2, y: 0, width: 2, height: 4, direction: 'up' },
-      { x: 5, y: 0, width: 2, height: 4, direction: 'up' },
-      { x: 8, y: 0, width: 2, height: 4, direction: 'up' },
-      { x: 11, y: 0, width: 2, height: 4, direction: 'up' },
-      { x: 14, y: 0, width: 2, height: 4, direction: 'up' },
-      { x: 17, y: 0, width: 2, height: 4, direction: 'up' },
-      { x: 2, y: 4, width: 2, height: 4, direction: 'down' },
-      { x: 5, y: 4, width: 2, height: 4, direction: 'down' },
-      { x: 8, y: 4, width: 2, height: 4, direction: 'down' },
-      { x: 11, y: 4, width: 2, height: 4, direction: 'down' },
-      { x: 14, y: 4, width: 2, height: 4, direction: 'down' },
-      { x: 17, y: 4, width: 2, height: 4, direction: 'down' }
-    ]
-  }
+      {
+        // Position auto-calculated from 'G' marker during parseLevel()
+        type: 'flip',
+        trigger: 'enter',
+        duration: null,
+        cooldown: 1.0,
+        oneShot: false,
+        initialActive: false,
+        visual: {
+          color: '#44ddff',
+          secondaryColor: '#ff44dd',
+          alpha: 0.35,
+          stripeAngle: 45,
+          stripeWidth: 8,
+          stripeSpacing: 20,
+          animated: true,
+          animSpeed: 40,
+          showArrow: true,
+          glowWhenActive: true
+        },
+        sound: {
+          enter: 'gravity_flip',
+          exit: 'gravity_restore'
+        }
+      }
+    ],
+    levels: [
+      {
+        name: "Level 1: First Steps Into Nothing",
+        map: [
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          ".S...............D..",
+          "####II##IIFFFF######",
+          "....................",
+          "...................."
+        ]
+        // Simple introduction - clear staircase pattern with invisible platforms
+      },
+      {
+        name: "Level 2: The Invisible Maze",
+        map: [
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          "....................",
+          ".S...............D..",
+          "####..##..###..#####",
+          "....................",
+          "...................."
+        ]
+      },
+      {
+        name: "Level 3: The Invisible Maze",
+        map: [
+          "...................D",
+          "....................",
+          "....................",
+          "...##G..............",
+          "....................",
+          "#....G###....#####Gg",
+          "....................",
+          "#######Gg...........",
+          ".S..................",
+          "##..................",
+          "....................",
+          "...Gg.....##......Gg"
+        ]
+      },
+      {
+        name: "Level 4: The Invisible Maze",
+        map: [
+          ".....Gg...Ggg.......",
+          "....................",
+          "....................",
+          "......##............",
+          ".............##Ggg..",
+          "........Gg..........",
+          "....................",
+          "....................",
+          ".S...............D..",
+          "##...............###",
+          "...Gg...............",
+          "...................."
+        ]
+      },
+      {
+        name: "Level 4: Gravity Test",
+        map: [
+          "....................",
+          "....................",
+          ".S................D.",
+          "####...#...#FFFFF##.",
+          "...#244#...#00000..",
+          "...#FFF#...######..#",
+          "...#...#...I....I...",
+          ".44#...#FFFFFFFF##..",
+          ".###...F........#...",
+          "..2#...F...........#",
+          "..##III#............",
+          "...#000#FFFF########"
+        ],
+        spikeTriggers: [-4, -3, -2, -4, -3, -1.1, -1.2, -1.3, -4.5, -3.5, -2.6, -1.7],
+        spikeTriggerLengths: [250, 250, 250, 83, 84, 85, 86, 87, 241, 242, 190, 91]
+      }
+    ],
+    bonusLevel: {
+      name: "Bonus: Chapter 2 Ultimate Challenge",
+      description: "Master of invisible platforms - trust nothing you can't see!",
+      map: [
+        "....................",
+        "....................",
+        "IIIIIII.......IIIIID",
+        "#######.......######",
+        ".......IIIIIII......",
+        ".......#######......",
+        "###....2....3....###",
+        "...IIII.IIII.IIII...",
+        "...####.####.####...",
+        "....................",
+        "....................",
+        "####################"
+      ],
+      spikeTriggers: [-2, -3],
+      spikeTriggerLengths: [200, 250]
+    }
 };
