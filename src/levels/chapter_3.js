@@ -1,74 +1,66 @@
-// Chapter 3: Sketch Deceptions
-// Hand-drawn aesthetic with advanced deceptions
+// Chapter 3: Sketched Reality
+// Hand-drawn sketch aesthetic
 
 const chapter3 = {
-  name: "Chapter 3: Sketch Deceptions",
-  description: "Nothing is as it seems in the sketches",
-  visualStyle: "sketch", // Hand-drawn sketch aesthetic
+  name: "Chapter 3: Sketched Reality",
+  description: "Where drawings come to life",
+  visualStyle: "sketch", // Used for rendering
   levels: [
-    // Level 1 - Introduction
     {
-      name: "Level 1: Sketchy Beginning",
+      name: "Level 1: Pencil Marks",
       map: [
         "....................",
         "....................",
         "....................",
         "....................",
         "....................",
-        "....................",
-        ".S................D.",
-        "###...............##",
-        "...#...F.....#######",
-        "....######.#........"
-      ]
-    },
-    // Level 2 - More complexity
-    {
-      name: "Level 2: Drawn Deceptions",
-      map: [
-        "....................",
-        "....................",
-        "....................",
-        "....................",
-        "....................",
-        ".S..................",
-        "####..1.............",
-        "........F...F.....D.",
-        ".....###############"
+        ".S.......1..........",
+        "####...####.........",
+        "..........####......",
+        ".............####...",
+        "................##D.",
+        "..................##"
       ],
       spikeTriggers: [-2]
     },
-    // Level 3 - Advanced
     {
-      name: "Level 3: Sketch Master",
+      name: "Level 2: Erased Path",
       map: [
         "....................",
         "....................",
-        "....................",
-        "....................",
-        "........#...........",
-        ".S......#...........",
-        "###.....##..........",
-        "........#....2....D.",
-        "###########FF.######"
-      ],
-      spikeTriggers: [-3]
+        ".S..................",
+        "###.....FF..........",
+        "...###..##.###......",
+        "..........I...###...",
+        "..........I.........",
+        "..........I.......D.",
+        "..........###########"
+      ]
     }
   ],
   bonusLevel: {
-    name: "Bonus: Sketch Chaos",
-    description: "Master the art of sketchy deception",
+    name: "Bonus: Sketch Master",
+    description: "Navigate the artist's nightmare",
     map: [
       "....................",
-      "....................",
-      "....................",
-      ".S...1..............",
-      "#####.####..FF######",
-      "....................",
-      "....................",
-      ".......2...3......D.",
-      "####################"
+      ".....2...............",
+      "#S######F##########.",
+      ".#......F...#.....#.",
+      "..F##F..I...#...2.#.",
+      "..#..#..#.....#.....",
+      "..#..#..#.....#...#.",
+      "F############.#####.",
+      "............#.......",
+      "............F.....D.",
+      "#.F..#..F..#########"
     ],
-    spikeTriggers: [-1, -3, -2]
+    spikeTriggers: [-2, -3]
   }
 };
+
+/* Total Deaths in Chapter 1
+* MH: 121 (Level 10 rage quit)
+* Serkan: 85 (Level 9 rage quit)
+* Serhat Abi: 130 (Level 10 rage quit)
+* Kadir Ihsan: 112 Chapter 1 complete
+*/
