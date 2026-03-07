@@ -1547,16 +1547,22 @@ function drawStyledSpike(spike, style) {
   const width = spike.width;
   const height = spike.height;
   
+  // All spikes use the same jagged shape, just different colors/effects
+  const spikeSplits = 10;
+  
   switch(style) {
     case 'neon':
-      // Neon triangular spikes with glow
+      // Neon spikes with glow (same shape as default)
       ctx.shadowBlur = 20;
       ctx.shadowColor = '#ff0055';
       ctx.fillStyle = spike.moving ? '#ff0055' : '#dd0044';
       
-      // Triangle
       ctx.beginPath();
-      ctx.moveTo(x + width/2, y);
+      ctx.moveTo(x + (width / spikeSplits) * 2, y);
+      for (let i = 1; i < spikeSplits - 1; i = i + 2) {
+        ctx.lineTo(x + (i * width) / spikeSplits, y + (height/5) * 3);
+        ctx.lineTo(x + ((i+1) * width) / spikeSplits, y);
+      }
       ctx.lineTo(x + width, y + height);
       ctx.lineTo(x, y + height);
       ctx.closePath();
@@ -1569,12 +1575,15 @@ function drawStyledSpike(spike, style) {
       break;
       
     case 'sketch':
-      // Hand-drawn sketchy spikes (static)
+      // Hand-drawn sketchy spikes (same shape as default)
       ctx.fillStyle = spike.moving ? '#ff0000' : '#dd0000';
       
-      // Static triangle
       ctx.beginPath();
-      ctx.moveTo(x + width/2, y);
+      ctx.moveTo(x + (width / spikeSplits) * 2, y);
+      for (let i = 1; i < spikeSplits - 1; i = i + 2) {
+        ctx.lineTo(x + (i * width) / spikeSplits, y + (height/5) * 3);
+        ctx.lineTo(x + ((i+1) * width) / spikeSplits, y);
+      }
       ctx.lineTo(x + width, y + height);
       ctx.lineTo(x, y + height);
       ctx.closePath();
@@ -1589,57 +1598,49 @@ function drawStyledSpike(spike, style) {
       break;
       
     case 'glitch':
-      // Glitchy pixelated spikes (static)
+      // Glitchy spikes (same shape as default)
       ctx.fillStyle = spike.moving ? '#ff0000' : '#dd0000';
       
-      // Draw pixelated spike (no offset animation)
-      const pixelSize = 4;
-      for (let py = y; py < y + height; py += pixelSize) {
-        for (let px = x; px < x + width; px += pixelSize) {
-          // Check if pixel is inside triangle
-          const relY = (py - y) / height;
-          const relX = (px - x) / width;
-          const inTriangle = relY > (1 - Math.abs(relX * 2 - 1));
-          
-          if (inTriangle) {
-            ctx.fillRect(px, py, pixelSize, pixelSize);
-          }
-        }
+      ctx.beginPath();
+      ctx.moveTo(x + (width / spikeSplits) * 2, y);
+      for (let i = 1; i < spikeSplits - 1; i = i + 2) {
+        ctx.lineTo(x + (i * width) / spikeSplits, y + (height/5) * 3);
+        ctx.lineTo(x + ((i+1) * width) / spikeSplits, y);
       }
-      
-      // Sharp outline
-      ctx.strokeStyle = spike.moving ? '#ff4444' : '#cc0000';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(x + width/2, y);
-      ctx.lineTo(x + width, y + height);
-      ctx.lineTo(x, y + height);
-      ctx.closePath();
-      ctx.stroke();
-      break;
-      
-    case 'surreal':
-      // Abstract danger shapes (static colors)
-      ctx.fillStyle = 'hsl(350, 100%, 50%)'; // Static red hue
-      
-      // Static triangle
-      ctx.beginPath();
-      ctx.moveTo(x + width/2, y);
       ctx.lineTo(x + width, y + height);
       ctx.lineTo(x, y + height);
       ctx.closePath();
       ctx.fill();
       
-      // Sharp outline
+      ctx.strokeStyle = spike.moving ? '#ff4444' : '#cc0000';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      break;
+      
+    case 'surreal':
+      // Abstract colored spikes (same shape as default)
+      ctx.fillStyle = spike.moving ? 'hsl(350, 100%, 50%)' : 'hsl(350, 80%, 45%)';
+      
+      ctx.beginPath();
+      ctx.moveTo(x + (width / spikeSplits) * 2, y);
+      for (let i = 1; i < spikeSplits - 1; i = i + 2) {
+        ctx.lineTo(x + (i * width) / spikeSplits, y + (height/5) * 3);
+        ctx.lineTo(x + ((i+1) * width) / spikeSplits, y);
+      }
+      ctx.lineTo(x + width, y + height);
+      ctx.lineTo(x, y + height);
+      ctx.closePath();
+      ctx.fill();
+      
       ctx.strokeStyle = 'hsl(350, 100%, 70%)';
       ctx.lineWidth = 2;
       ctx.stroke();
       break;
       
     default:
-      // Default spike rendering (existing code)
+      // Default spike rendering
       ctx.fillStyle = spike.moving ? '#ff0000' : '#dd0000';
-      let spikeSplits = 10;
+      
       ctx.beginPath();
       ctx.moveTo(x + (width / spikeSplits) * 2, y);
       for (let i = 1; i < spikeSplits - 1; i = i + 2) {
@@ -1741,6 +1742,494 @@ function updateTriggerInfo() {
   triggerInfoElement.textContent = infoText;
 }
 
+// Helper: Draw door based on visual style
+function drawStyledDoor(door, style) {
+  const x = door.x;
+  const y = door.y;
+  const width = door.width;
+  const height = door.height;
+  
+  switch(style) {
+    case 'neon':
+      // Neon glowing door
+      ctx.shadowBlur = 20;
+      ctx.shadowColor = '#44ff44';
+      ctx.fillStyle = '#00ff44';
+      ctx.fillRect(x, y, width, height);
+      
+      // Bright neon outline
+      ctx.strokeStyle = '#00ffaa';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x, y, width, height);
+      
+      // Glowing center line
+      ctx.strokeStyle = '#88ffaa';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x + width / 2, y);
+      ctx.lineTo(x + width / 2, y + height);
+      ctx.stroke();
+      
+      // Neon door knob
+      ctx.shadowBlur = 15;
+      ctx.fillStyle = '#ffff00';
+      ctx.fillRect(x + width * 0.7, y + height * 0.5, 6, 6);
+      ctx.shadowBlur = 0;
+      break;
+      
+    case 'sketch':
+      // Hand-drawn sketchy door
+      ctx.fillStyle = '#44ff44';
+      ctx.fillRect(x, y, width, height);
+      
+      // Sketchy outline (multiple lines)
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 3; i++) {
+        const offset = i * 0.5;
+        ctx.strokeRect(x + offset, y + offset, width, height);
+      }
+      
+      // Sketchy center line
+      ctx.strokeStyle = '#33cc33';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 3]);
+      ctx.beginPath();
+      ctx.moveTo(x + width / 2, y);
+      ctx.lineTo(x + width / 2, y + height);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      
+      // Sketchy door knob
+      ctx.fillStyle = '#ffff00';
+      ctx.beginPath();
+      ctx.arc(x + width * 0.7, y + height * 0.5, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      break;
+      
+    case 'glitch':
+      // Glitchy digital door with RGB split
+      ctx.fillStyle = 'rgba(0, 255, 0, 0.3)';
+      ctx.fillRect(x - 2, y, width, height);
+      ctx.fillStyle = 'rgba(255, 0, 255, 0.3)';
+      ctx.fillRect(x + 2, y, width, height);
+      
+      // Main door
+      ctx.fillStyle = '#00ff44';
+      ctx.fillRect(x, y, width, height);
+      
+      // Glitch outline
+      ctx.strokeStyle = '#00ffff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, width, height);
+      
+      // Glitchy center line
+      ctx.strokeStyle = '#ff00ff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x + width / 2, y);
+      ctx.lineTo(x + width / 2, y + height);
+      ctx.stroke();
+      
+      // Pixelated door knob
+      ctx.fillStyle = '#ffff00';
+      ctx.fillRect(x + width * 0.7 - 3, y + height * 0.5 - 3, 6, 6);
+      break;
+      
+    case 'surreal':
+      // Abstract flowing door
+      const hue = ((x + y) / 10 % 360);
+      ctx.fillStyle = `hsl(${hue + 120}, 70%, 50%)`;
+      ctx.fillRect(x, y, width, height);
+      
+      // Flowing outline
+      ctx.strokeStyle = `hsl(${hue + 150}, 80%, 60%)`;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x, y, width, height);
+      
+      // Abstract center line
+      ctx.strokeStyle = `hsl(${hue + 180}, 90%, 70%)`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x + width / 2, y);
+      ctx.lineTo(x + width / 2, y + height);
+      ctx.stroke();
+      
+      // Surreal door knob
+      ctx.fillStyle = `hsl(${hue + 60}, 100%, 70%)`;
+      ctx.fillRect(x + width * 0.7, y + height * 0.5, 6, 6);
+      break;
+      
+    default:
+      // Default green door with yellow outline
+      ctx.fillStyle = '#44ff44';
+      ctx.fillRect(x, y, width, height);
+      
+      ctx.strokeStyle = '#ffff44';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x, y, width, height);
+      
+      ctx.strokeStyle = '#33cc33';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x + width / 2, y);
+      ctx.lineTo(x + width / 2, y + height);
+      ctx.stroke();
+      
+      ctx.fillStyle = '#ffff44';
+      ctx.fillRect(x + width * 0.7, y + height * 0.5, 6, 6);
+  }
+}
+
+// Helper: Draw gravity zone based on visual style
+function drawStyledGravityZone(zone, isActive, style) {
+  const x = zone.x;
+  const y = zone.y;
+  const width = zone.width;
+  const height = zone.height;
+  const visual = zone.visual;
+  
+  switch(style) {
+    case 'neon':
+      // Neon glowing gravity zone
+      const gradient = ctx.createLinearGradient(x, y, x + width, y + height);
+      gradient.addColorStop(0, visual.color);
+      gradient.addColorStop(1, visual.secondaryColor);
+      
+      ctx.globalAlpha = visual.alpha;
+      ctx.fillStyle = gradient;
+      ctx.fillRect(x, y, width, height);
+      ctx.globalAlpha = 1.0;
+      
+      // Animated diagonal stripes
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, y, width, height);
+      ctx.clip();
+      
+      ctx.strokeStyle = visual.secondaryColor;
+      ctx.lineWidth = visual.stripeWidth;
+      ctx.globalAlpha = visual.alpha * 0.6;
+      
+      const offset = visual.animated ? (Date.now() / 1000 * visual.animSpeed) % visual.stripeSpacing : 0;
+      
+      for (let i = -height; i < width + height; i += visual.stripeSpacing) {
+        ctx.beginPath();
+        const x1 = x + i + offset;
+        const y1 = y;
+        const x2 = x + i - height + offset;
+        const y2 = y + height;
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+      
+      ctx.restore();
+      
+      // Glowing border when active
+      if (visual.glowWhenActive && isActive) {
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 3;
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = visual.color;
+      } else {
+        ctx.strokeStyle = visual.color;
+        ctx.lineWidth = 2;
+      }
+      ctx.strokeRect(x, y, width, height);
+      ctx.shadowBlur = 0;
+      
+      // Arrow
+      if (visual.showArrow) {
+        const centerX = x + width / 2;
+        const centerY = y + height / 2;
+        const arrowSize = Math.min(width, height) * 0.2;
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.globalAlpha = 0.8;
+        
+        const direction = (player && player.gravityScale > 0) ? -1 : 1;
+        
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY + arrowSize * direction);
+        ctx.lineTo(centerX - arrowSize / 2, centerY - arrowSize * direction);
+        ctx.lineTo(centerX + arrowSize / 2, centerY - arrowSize * direction);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.globalAlpha = 1.0;
+      }
+      break;
+      
+    case 'sketch':
+      // Hand-drawn sketchy gravity zone
+      ctx.fillStyle = 'rgba(68, 221, 255, 0.2)';
+      ctx.fillRect(x, y, width, height);
+      
+      // Sketchy border (multiple lines)
+      ctx.strokeStyle = '#44ddff';
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 3; i++) {
+        const offset = i * 0.5;
+        ctx.strokeRect(x + offset, y + offset, width, height);
+      }
+      
+      // Hand-drawn diagonal lines (with subtle animation) - with clipping
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, y, width, height);
+      ctx.clip();
+      
+      ctx.strokeStyle = 'rgba(255, 68, 221, 0.4)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 5]);
+      
+      const sketchOffset = visual.animated ? (Date.now() / 1000 * 10) % 15 : 0;
+      
+      for (let i = -height; i < width + height; i += 15) {
+        ctx.beginPath();
+        ctx.moveTo(x + i + sketchOffset, y);
+        ctx.lineTo(x + i - height + sketchOffset, y + height);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      
+      ctx.restore();
+      
+      // Sketchy arrow
+      if (visual.showArrow) {
+        const centerX = x + width / 2;
+        const centerY = y + height / 2;
+        const arrowSize = Math.min(width, height) * 0.2;
+        
+        ctx.fillStyle = '#000000';
+        ctx.globalAlpha = 0.6;
+        
+        const direction = (player && player.gravityScale > 0) ? -1 : 1;
+        
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY + arrowSize * direction);
+        ctx.lineTo(centerX - arrowSize / 2, centerY - arrowSize * direction);
+        ctx.lineTo(centerX + arrowSize / 2, centerY - arrowSize * direction);
+        ctx.closePath();
+        ctx.fill();
+        
+        // Sketchy outline
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        
+        ctx.globalAlpha = 1.0;
+      }
+      
+      if (isActive) {
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([5, 5]);
+        ctx.strokeRect(x, y, width, height);
+        ctx.setLineDash([]);
+      }
+      break;
+      
+    case 'glitch':
+      // Glitchy digital gravity zone
+      // RGB split effect
+      ctx.globalAlpha = 0.15;
+      ctx.fillStyle = '#ff0000';
+      ctx.fillRect(x - 2, y, width, height);
+      ctx.fillStyle = '#00ff00';
+      ctx.fillRect(x, y, width, height);
+      ctx.fillStyle = '#0000ff';
+      ctx.fillRect(x + 2, y, width, height);
+      ctx.globalAlpha = 1.0;
+      
+      // Main zone
+      ctx.fillStyle = 'rgba(68, 221, 255, 0.25)';
+      ctx.fillRect(x, y, width, height);
+      
+      // Pixelated stripes (with animation) - with clipping
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, y, width, height);
+      ctx.clip();
+      
+      ctx.fillStyle = 'rgba(255, 68, 221, 0.3)';
+      const pixelSize = 4;
+      const glitchOffset = visual.animated ? (Date.now() / 1000 * 15) % 20 : 0;
+      
+      for (let i = -height; i < width + height; i += 20) {
+        for (let py = y; py < y + height; py += pixelSize) {
+          const px = x + i - (py - y) + glitchOffset;
+          ctx.fillRect(px, py, pixelSize * 2, pixelSize);
+        }
+      }
+      
+      ctx.restore();
+      
+      // Sharp border
+      ctx.strokeStyle = isActive ? '#00ffff' : '#44ddff';
+      ctx.lineWidth = isActive ? 3 : 2;
+      ctx.strokeRect(x, y, width, height);
+      
+      // Glitch arrow
+      if (visual.showArrow) {
+        const centerX = x + width / 2;
+        const centerY = y + height / 2;
+        const arrowSize = Math.min(width, height) * 0.2;
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.globalAlpha = 0.9;
+        
+        const direction = (player && player.gravityScale > 0) ? -1 : 1;
+        
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY + arrowSize * direction);
+        ctx.lineTo(centerX - arrowSize / 2, centerY - arrowSize * direction);
+        ctx.lineTo(centerX + arrowSize / 2, centerY - arrowSize * direction);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.globalAlpha = 1.0;
+      }
+      break;
+      
+    case 'surreal':
+      // Abstract flowing gravity zone
+      const hue = ((x + y) / 10 % 360);
+      
+      // Flowing gradient
+      const gradient2 = ctx.createRadialGradient(
+        x + width / 2, y + height / 2, 0,
+        x + width / 2, y + height / 2, Math.max(width, height) / 2
+      );
+      gradient2.addColorStop(0, `hsla(${hue}, 70%, 50%, 0.3)`);
+      gradient2.addColorStop(1, `hsla(${hue + 60}, 70%, 50%, 0.2)`);
+      
+      ctx.fillStyle = gradient2;
+      ctx.fillRect(x, y, width, height);
+      
+      // Flowing wavy lines (with animation) - with clipping
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, y, width, height);
+      ctx.clip();
+      
+      ctx.strokeStyle = `hsla(${hue + 120}, 80%, 60%, 0.4)`;
+      ctx.lineWidth = 2;
+      
+      const surrealTime = visual.animated ? Date.now() / 1000 : 0;
+      
+      for (let i = 0; i < height; i += 10) {
+        ctx.beginPath();
+        ctx.moveTo(x, y + i);
+        for (let j = 0; j <= width; j += 5) {
+          const wave = Math.sin((j / width) * Math.PI * 2 + (i / 10) + surrealTime) * 5;
+          ctx.lineTo(x + j, y + i + wave);
+        }
+        ctx.stroke();
+      }
+      
+      ctx.restore();
+      
+      // Surreal border
+      ctx.strokeStyle = isActive ? `hsl(${hue + 180}, 90%, 70%)` : `hsl(${hue}, 80%, 60%)`;
+      ctx.lineWidth = isActive ? 3 : 2;
+      ctx.strokeRect(x, y, width, height);
+      
+      // Abstract arrow
+      if (visual.showArrow) {
+        const centerX = x + width / 2;
+        const centerY = y + height / 2;
+        const arrowSize = Math.min(width, height) * 0.2;
+        
+        ctx.fillStyle = `hsl(${hue + 240}, 100%, 70%)`;
+        ctx.globalAlpha = 0.8;
+        
+        const direction = (player && player.gravityScale > 0) ? -1 : 1;
+        
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY + arrowSize * direction);
+        ctx.lineTo(centerX - arrowSize / 2, centerY - arrowSize * direction);
+        ctx.lineTo(centerX + arrowSize / 2, centerY - arrowSize * direction);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.globalAlpha = 1.0;
+      }
+      break;
+      
+    default:
+      // Default gravity zone (original style)
+      const defaultGradient = ctx.createLinearGradient(x, y, x + width, y + height);
+      defaultGradient.addColorStop(0, visual.color);
+      defaultGradient.addColorStop(1, visual.secondaryColor);
+      
+      ctx.globalAlpha = visual.alpha;
+      ctx.fillStyle = defaultGradient;
+      ctx.fillRect(x, y, width, height);
+      ctx.globalAlpha = 1.0;
+      
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, y, width, height);
+      ctx.clip();
+      
+      ctx.strokeStyle = visual.secondaryColor;
+      ctx.lineWidth = visual.stripeWidth;
+      ctx.globalAlpha = visual.alpha * 0.6;
+      
+      const defaultOffset = visual.animated ? (Date.now() / 1000 * visual.animSpeed) % visual.stripeSpacing : 0;
+      
+      for (let i = -height; i < width + height; i += visual.stripeSpacing) {
+        ctx.beginPath();
+        const x1 = x + i + defaultOffset;
+        const y1 = y;
+        const x2 = x + i - height + defaultOffset;
+        const y2 = y + height;
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+      
+      ctx.restore();
+      
+      if (visual.glowWhenActive && isActive) {
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 3;
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = visual.color;
+      } else {
+        ctx.strokeStyle = visual.color;
+        ctx.lineWidth = 2;
+      }
+      ctx.strokeRect(x, y, width, height);
+      ctx.shadowBlur = 0;
+      
+      if (visual.showArrow) {
+        const centerX = x + width / 2;
+        const centerY = y + height / 2;
+        const arrowSize = Math.min(width, height) * 0.2;
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.globalAlpha = 0.8;
+        
+        const direction = (player && player.gravityScale > 0) ? -1 : 1;
+        
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY + arrowSize * direction);
+        ctx.lineTo(centerX - arrowSize / 2, centerY - arrowSize * direction);
+        ctx.lineTo(centerX + arrowSize / 2, centerY - arrowSize * direction);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.globalAlpha = 1.0;
+      }
+  }
+}
+
 // Render game
 function render() {
   // Get current visual style
@@ -1819,86 +2308,13 @@ function render() {
     drawStyledPlatform(fakeBlock.x, fakeBlock.y, fakeBlock.width, fakeBlock.height, visualStyle, true);
   });
 
-  // Draw gravity zones
+  // Draw gravity zones with visual style
   if (ENABLE_GRAVITY_ZONES) {
     gravityZones.forEach(zone => {
       const isActive = player && player.currentGravityZone === zone.id;
-      const visual = zone.visual;
       
-      // Background with gradient
-      const gradient = ctx.createLinearGradient(
-        zone.x, zone.y,
-        zone.x + zone.width, zone.y + zone.height
-      );
-      gradient.addColorStop(0, visual.color);
-      gradient.addColorStop(1, visual.secondaryColor);
-      
-      ctx.globalAlpha = visual.alpha;
-      ctx.fillStyle = gradient;
-      ctx.fillRect(zone.x, zone.y, zone.width, zone.height);
-      ctx.globalAlpha = 1.0;
-      
-      // Diagonal stripes
-      ctx.save();
-      
-      // IMPORTANT: Clip to zone boundaries to prevent stripes extending beyond the box
-      ctx.beginPath();
-      ctx.rect(zone.x, zone.y, zone.width, zone.height);
-      ctx.clip();
-      
-      ctx.strokeStyle = visual.secondaryColor;
-      ctx.lineWidth = visual.stripeWidth;
-      ctx.globalAlpha = visual.alpha * 0.6;
-      
-      const offset = visual.animated ? (Date.now() / 1000 * visual.animSpeed) % visual.stripeSpacing : 0;
-      
-      for (let i = -zone.height; i < zone.width + zone.height; i += visual.stripeSpacing) {
-        ctx.beginPath();
-        const x1 = zone.x + i + offset;
-        const y1 = zone.y;
-        const x2 = zone.x + i - zone.height + offset;
-        const y2 = zone.y + zone.height;
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.stroke();
-      }
-      
-      ctx.restore();
-      
-      // Border (glows when active)
-      if (visual.glowWhenActive && isActive) {
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 3;
-        ctx.shadowBlur = 15;
-        ctx.shadowColor = visual.color;
-      } else {
-        ctx.strokeStyle = visual.color;
-        ctx.lineWidth = 2;
-      }
-      ctx.strokeRect(zone.x, zone.y, zone.width, zone.height);
-      ctx.shadowBlur = 0;
-      
-      // Gravity direction arrow
-      if (visual.showArrow) {
-        const centerX = zone.x + zone.width / 2;
-        const centerY = zone.y + zone.height / 2;
-        const arrowSize = Math.min(zone.width, zone.height) * 0.2;
-        
-        ctx.fillStyle = '#ffffff';
-        ctx.globalAlpha = 0.8;
-        
-        // Arrow points in opposite direction of current gravity (shows what will happen)
-        const direction = (player && player.gravityScale > 0) ? -1 : 1;
-        
-        ctx.beginPath();
-        ctx.moveTo(centerX, centerY + arrowSize * direction);
-        ctx.lineTo(centerX - arrowSize / 2, centerY - arrowSize * direction);
-        ctx.lineTo(centerX + arrowSize / 2, centerY - arrowSize * direction);
-        ctx.closePath();
-        ctx.fill();
-        
-        ctx.globalAlpha = 1.0;
-      }
+      // Draw gravity zone with chapter-specific visual style
+      drawStyledGravityZone(zone, isActive, visualStyle);
       
       // Debug info
       if (DEBUG_MODE) {
@@ -1910,27 +2326,9 @@ function render() {
     });
   }
 
-  // Draw door (green rectangle with yellow outline)
+  // Draw door with visual style
   if (door) {
-    ctx.fillStyle = '#44ff44';
-    ctx.fillRect(door.x, door.y, door.width, door.height);
-
-    // Door outline
-    ctx.strokeStyle = '#ffff44';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(door.x, door.y, door.width, door.height);
-
-    // Draw door panels
-    ctx.strokeStyle = '#33cc33';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(door.x + door.width / 2, door.y);
-    ctx.lineTo(door.x + door.width / 2, door.y + door.height);
-    ctx.stroke();
-
-    // Door knob
-    ctx.fillStyle = '#ffff44';
-    ctx.fillRect(door.x + door.width * 0.7, door.y + door.height * 0.5, 6, 6);
+    drawStyledDoor(door, visualStyle);
   }
 
   // Draw spikes with visual style
