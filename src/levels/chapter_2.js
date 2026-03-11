@@ -159,18 +159,18 @@ const chapter2 = {
       name: "Bonus: Chapter 2 Ultimate Challenge",
       description: "Master of invisible platforms - trust nothing you can't see!",
       map: [
+        "Gggggggggggggggggggg",
         "....................",
         "....................",
-        "IIIIIII.......IIIIID",
-        "#######.......######",
-        ".......IIIIIII......",
-        ".......#######......",
-        "###....2....3....###",
-        "...IIII.IIII.IIII...",
-        "...####.####.####...",
         "....................",
         "....................",
-        "####################"
+        "....................",
+        "..S..............D..",
+        "....................",
+        "....................",
+        "....................",
+        "..#.................",
+        "Gggggggggggggggggggg"
       ],
       spikeTriggers: [-2, -3],
       spikeTriggerLengths: [200, 250]
