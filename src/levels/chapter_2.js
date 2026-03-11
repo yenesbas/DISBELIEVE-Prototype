@@ -169,8 +169,8 @@ const chapter2 = {
         "....................",
         "....................",
         "....................",
-        "..#.................",
-        "Gggggggggggggggggggg"
+        "....................",
+        "Gg#ggggggggggggggggg"
       ],
       spikeTriggers: [-2, -3],
       spikeTriggerLengths: [200, 250]
