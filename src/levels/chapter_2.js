@@ -53,7 +53,7 @@ const chapter2 = {
         // Simple introduction - clear staircase pattern with invisible platforms
       },
       {
-        name: "Level 2: The Invisible Maze",
+        name: "Level 2: Invisible Walls",
         map: [
           "....................",
           "....................",
@@ -70,7 +70,7 @@ const chapter2 = {
         ]
       },
       {
-        name: "Level 3: The Invisible Maze",
+        name: "Level 3: Zigzag Platforms",
         map: [
           "IIIIIIIIIIIIIIIIIIII",
           ".................D..",
@@ -87,7 +87,7 @@ const chapter2 = {
         ]
       },
       {
-        name: "Level 4: The Invisible Maze",
+        name: "Level 4: Gravity Introduction",
         map: [
           "....##...#######Gggg",
           "....................",
@@ -104,7 +104,7 @@ const chapter2 = {
         ]
       },
       {
-        name: "Level 5: The Invisible Maze",
+        name: "Level 5: Gravity Gauntlet",
         map: [
           ".....Gg...Ggg.......",
           "....................",
@@ -121,7 +121,7 @@ const chapter2 = {
         ]
       },
       {
-        name: "Level 6: The Invisible Maze",
+        name: "Level 6: Upside Down Route",
         map: [
           "...................D",
           "....................",
@@ -138,7 +138,7 @@ const chapter2 = {
         ]
       },
       {
-        name: "Level 7: The Invisible Maze",
+        name: "Level 7: Illusion Master",
         map: [
           "IIIIIIGg######FF##Gg",
           "............F.......",
