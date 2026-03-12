@@ -50,7 +50,6 @@ const chapter2 = {
           "....................",
           "...................."
         ]
-        // Simple introduction - clear staircase pattern with invisible platforms
       },
       {
         name: "Level 2: Invisible Walls",
@@ -70,7 +69,7 @@ const chapter2 = {
         ]
       },
       {
-        name: "Level 3: Zigzag Platforms",
+        name: "Level 3: Invisible Corridors",
         map: [
           "IIIIIIIIIIIIIIIIIIII",
           ".................D..",
@@ -155,7 +154,7 @@ const chapter2 = {
         ]
       },
       {
-        name: "Level 8: Invisible Corridors",
+        name: "Level 8: Zigzag Platforms",
         map: [
           ".I....G..I.I....G...",
           ".........I..........",
