@@ -1205,6 +1205,11 @@ function completeLevel() {
 // Check if player crosses vertical trigger lines to activate spikes
 function checkSpikeTriggers() {
   spikes.forEach(spike => {
+    // Skip spikes with 0 movement distance (stationary spikes) - they have no trigger
+    if (spike.moveDistance === 0) {
+      return;
+    }
+    
     if (!spike.triggered && !spike.moved) {
       const playerRightEdge = player.x + player.width;
       const playerLeftEdge = player.x;
