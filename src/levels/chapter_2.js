@@ -138,7 +138,7 @@ const chapter2 = {
         ]
       },
       {
-        name: "Level 7: Illusion Master",
+        name: "Level 7: The Deception Maze",
         map: [
           "IIIIIIGg######FF##Gg",
           "............F.......",
@@ -155,7 +155,7 @@ const chapter2 = {
         ]
       },
       {
-        name: "Level 8: Illusion Master",
+        name: "Level 8: Invisible Corridors",
         map: [
           ".I....G..I.I....G...",
           ".........I..........",
@@ -172,7 +172,7 @@ const chapter2 = {
         ]
       },
       {
-        name: "Level 9: Illusion Master",
+        name: "Level 9: Trust No Ground",
         map: [
           ".#....G..##FF...G...",
           ".S.......#..........",
