@@ -18,6 +18,12 @@ const SPIKE_TRIGGER_DISTANCE = 420;
 const SPIKE_MOVE_DISTANCE = TILE_SIZE * 2;
 const COYOTE_TIME_DURATION = 0.1; // 100ms window to jump after leaving platform
 
+// Crumbling platform constants (Chapter 3 mechanic)
+const CRUMBLE_DELAY = 0.6;           // Seconds player stands on it before it falls
+const CRUMBLE_FALL_DURATION = 0.35;  // Seconds the fall animation takes
+const CRUMBLE_RESET_DELAY = 3.0;     // Seconds until platform respawns
+const CRUMBLE_RESPAWN_DURATION = 0.5; // Seconds the respawn fade-in takes
+
 // Sound system
 const sounds = {
   // Short beep sound for jump
@@ -240,6 +246,7 @@ let player = null;
 let platforms = [];
 let fakeBlocks = []; // Blocks that look solid but player passes through
 let invisiblePlatforms = []; // Platforms that are solid but completely invisible
+let crumblingPlatforms = []; // Platforms that crumble/erase when stepped on (Chapter 3)
 let spikes = [];
 let gravityZones = []; // Areas that flip or modify gravity
 let door = null;
@@ -574,6 +581,7 @@ function parseLevel() {
   platforms = [];
   fakeBlocks = [];
   invisiblePlatforms = [];
+  crumblingPlatforms = [];
   spikes = [];
   door = null;
   spawnPoint = null; // Reset custom spawn point for each level
@@ -599,6 +607,14 @@ function parseLevel() {
       } else if (char === 'I') {
         // Invisible platform - has collision but is completely invisible
         invisiblePlatforms.push({ x, y, width: TILE_SIZE, height: TILE_SIZE });
+      } else if (char === 'E') {
+        // Crumbling/erasing platform - falls when stepped on, respawns after a delay
+        crumblingPlatforms.push({
+          x, y, width: TILE_SIZE, height: TILE_SIZE,
+          state: 'solid',  // 'solid', 'crumbling', 'fallen', 'respawning'
+          timer: 0,
+          alpha: 1.0
+        });
       } else if (/^[0-9]$/.test(char) || char === '^') {
         // Handle spikes with movement distances 0-9 or backward compatibility '^'
         let moveDistance;
@@ -811,6 +827,13 @@ function resetPlayer() {
     spike.moved = false;
     spike.moving = false;
     spike.moveTimer = 0;
+  });
+
+  // Reset all crumbling platforms
+  crumblingPlatforms.forEach(p => {
+    p.state = 'solid';
+    p.timer = 0;
+    p.alpha = 1.0;
   });
 
   isDead = false;
@@ -1053,6 +1076,19 @@ function update(deltaTime) {
     }
   });
 
+  // Crumbling platform horizontal collision (only when solid or crumbling)
+  crumblingPlatforms.forEach(platform => {
+    if (platform.state === 'solid' || platform.state === 'crumbling') {
+      if (checkCollision(player, platform)) {
+        if (player.vx > 0) {
+          player.x = platform.x - player.width;
+        } else if (player.vx < 0) {
+          player.x = platform.x + platform.width;
+        }
+      }
+    }
+  });
+
   // Update vertical position (scaled by deltaTime)
   player.y += player.vy * deltaTime;
 
@@ -1116,6 +1152,69 @@ function update(deltaTime) {
           player.y = platform.y - player.height;
           player.vy = 0;
         }
+      }
+    }
+  });
+
+  // Crumbling platform vertical collision (only when solid or crumbling)
+  crumblingPlatforms.forEach(platform => {
+    if (platform.state === 'solid' || platform.state === 'crumbling') {
+      if (checkCollision(player, platform)) {
+        if (player.gravityScale > 0) {
+          if (player.vy > 0) {
+            player.y = platform.y - player.height;
+            player.vy = 0;
+            player.onGround = true;
+            if (platform.state === 'solid') {
+              platform.state = 'crumbling';
+              platform.timer = 0;
+            }
+          } else if (player.vy < 0) {
+            player.y = platform.y + platform.height;
+            player.vy = 0;
+          }
+        } else {
+          // Inverted gravity: ceiling becomes floor
+          if (player.vy < 0) {
+            player.y = platform.y + platform.height;
+            player.vy = 0;
+            player.onGround = true;
+            if (platform.state === 'solid') {
+              platform.state = 'crumbling';
+              platform.timer = 0;
+            }
+          } else if (player.vy > 0) {
+            player.y = platform.y - player.height;
+            player.vy = 0;
+          }
+        }
+      }
+    }
+  });
+
+  // Update crumbling platform timers
+  crumblingPlatforms.forEach(platform => {
+    if (platform.state === 'crumbling') {
+      platform.timer += deltaTime;
+      if (platform.timer >= CRUMBLE_DELAY) {
+        platform.state = 'fallen';
+        platform.timer = 0;
+        platform.alpha = 0;
+      }
+    } else if (platform.state === 'fallen') {
+      platform.timer += deltaTime;
+      if (platform.timer >= CRUMBLE_RESET_DELAY) {
+        platform.state = 'respawning';
+        platform.timer = 0;
+        platform.alpha = 0;
+      }
+    } else if (platform.state === 'respawning') {
+      platform.timer += deltaTime;
+      platform.alpha = platform.timer / CRUMBLE_RESPAWN_DURATION;
+      if (platform.timer >= CRUMBLE_RESPAWN_DURATION) {
+        platform.state = 'solid';
+        platform.timer = 0;
+        platform.alpha = 1.0;
       }
     }
   });
@@ -1543,6 +1642,134 @@ function drawStyledPlatform(x, y, width, height, style, isFake = false) {
       ctx.strokeStyle = '#555';
       ctx.strokeRect(x, y, width, height);
   }
+}
+
+// Helper: Draw crumbling/erasing platform (Chapter 3 mechanic)
+function drawStyledCrumblingPlatform(platform, style) {
+  if (platform.state === 'fallen') return; // Fully erased, don't draw
+
+  const { x, y, width, height, state, timer, alpha } = platform;
+
+  // Compute animation values
+  let displayAlpha = 1.0;
+  let shakeX = 0;
+  let crackProgress = 0; // 0 = no cracks, 1 = fully cracked
+
+  if (state === 'crumbling') {
+    const progress = timer / CRUMBLE_DELAY;
+    crackProgress = progress;
+    // Shake intensifies as platform crumbles: small at start, big near fall
+    shakeX = Math.sin(timer * 35) * (progress * 5);
+    // Alpha starts dropping in the last 40% of the crumble delay
+    displayAlpha = progress > 0.6 ? 1.0 - ((progress - 0.6) / 0.4) : 1.0;
+  } else if (state === 'respawning') {
+    displayAlpha = alpha; // alpha goes 0→1 during respawn
+    crackProgress = 0;
+  }
+
+  const rx = x + shakeX; // Render x with shake applied
+
+  ctx.save();
+  ctx.globalAlpha = displayAlpha;
+
+  if (style === 'sketch') {
+    // === SKETCH STYLE ===
+    // Lighter fill than regular platforms to visually distinguish
+    ctx.fillStyle = state === 'respawning' ? '#888888' : '#4a4a4a';
+    ctx.fillRect(rx, y, width, height);
+
+    // Sketchy pencil outline (slightly imprecise lines for hand-drawn feel)
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 3; i++) {
+      const off = i * 0.5;
+      ctx.strokeRect(rx + off, y + off, width, height);
+    }
+
+    // Diagonal hatch lines (sparser than regular to look different)
+    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < width; i += 14) {
+      ctx.beginPath();
+      ctx.moveTo(rx + i, y);
+      ctx.lineTo(rx + i, y + height);
+      ctx.stroke();
+    }
+
+    // Crack lines: drawn as scribbled eraser marks
+    if (crackProgress > 0) {
+      ctx.strokeStyle = 'rgba(245,245,220,0.9)'; // near-paper color = eraser
+      ctx.lineWidth = 2;
+      // Crack 1 — horizontal crack from left
+      const crack1Width = crackProgress * width * 0.55;
+      ctx.beginPath();
+      ctx.moveTo(rx + 4, y + height * 0.45);
+      ctx.lineTo(rx + 4 + crack1Width * 0.5, y + height * 0.5);
+      ctx.lineTo(rx + 4 + crack1Width, y + height * 0.42);
+      ctx.stroke();
+      // Crack 2 — diagonal from top right (appears after 50% crumble)
+      if (crackProgress > 0.5) {
+        const crack2Progress = (crackProgress - 0.5) / 0.5;
+        const crack2Len = crack2Progress * width * 0.45;
+        ctx.beginPath();
+        ctx.moveTo(rx + width - 6, y + 4);
+        ctx.lineTo(rx + width - 6 - crack2Len * 0.4, y + 4 + crack2Len * 0.6);
+        ctx.lineTo(rx + width - 6 - crack2Len * 0.7, y + 4 + crack2Len);
+        ctx.stroke();
+      }
+    }
+
+    // Pencil "E" hint label (small, in corner — visible only on solid state)
+    if (state === 'solid' || state === 'respawning') {
+      ctx.fillStyle = 'rgba(245,245,220,0.7)';
+      ctx.font = `bold ${Math.floor(height * 0.4)}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('~', rx + width / 2, y + height / 2);
+    }
+
+  } else if (style === 'neon') {
+    // === NEON STYLE ===
+    const crumbleColor = state === 'crumbling' ? '#ff6600' : '#00aaaa';
+    ctx.shadowBlur = 12;
+    ctx.shadowColor = crumbleColor;
+    ctx.fillStyle = state === 'crumbling' ? '#663300' : '#004444';
+    ctx.fillRect(rx, y, width, height);
+    ctx.strokeStyle = crumbleColor;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(rx, y, width, height);
+    // Crack glow
+    if (crackProgress > 0) {
+      ctx.strokeStyle = '#ffaa00';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(rx + 4, y + height * 0.5);
+      ctx.lineTo(rx + 4 + crackProgress * width * 0.6, y + height * 0.45);
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+
+  } else {
+    // === DEFAULT STYLE ===
+    ctx.fillStyle = state === 'crumbling' ? '#888' : '#aaa';
+    ctx.fillRect(rx, y, width, height);
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(rx, y, width, height);
+    // Crack lines
+    if (crackProgress > 0) {
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 2]);
+      ctx.beginPath();
+      ctx.moveTo(rx + 5, y + height * 0.5);
+      ctx.lineTo(rx + 5 + crackProgress * width * 0.6, y + height * 0.45);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  ctx.restore();
 }
 
 // Helper: Draw spike based on visual style
@@ -2307,6 +2534,11 @@ function render() {
     });
     ctx.lineWidth = 1; // Reset line width
   }
+
+  // Draw crumbling platforms (before fake blocks so they appear under deception layer)
+  crumblingPlatforms.forEach(platform => {
+    drawStyledCrumblingPlatform(platform, visualStyle);
+  });
 
   // Draw fake blocks with visual style (may look different from real platforms in some styles)
   fakeBlocks.forEach(fakeBlock => {
