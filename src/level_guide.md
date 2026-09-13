@@ -1,10 +1,19 @@
 # How to Build Your Own Levels
 
+> **Building a level as a player?** Use the in-game editor instead: main menu ->
+> **MY LEVELS**. It does everything described below by dragging, and it writes
+> this exact format. See [`editor/EDITOR_GUIDE.md`](editor/EDITOR_GUIDE.md).
+>
+> This document describes the level format itself, for levels written by hand
+> into `src/levels/chapter_*.js`.
+
 ## Level Map Characters
 - `.`  = Empty space (air)
 - `#`  = Ground/Platform (solid block - player collides with it)
 - `F`  = Fake block (looks like ground but player passes through it!)
 - `I`  = Invisible platform (solid collision but completely invisible!)
+- `E`  = Crumbling platform (falls away shortly after the player stands on it)
+- `G` / `g` = Gravity zone tile (connected tiles form one flip zone)
 - `S`  = Spawn Point (player starting position)
 - `D`  = Door (level exit - player must reach this to complete)
 - `1`  = Spike that moves 1 tile  (40px) when triggered

@@ -211,6 +211,8 @@ function getCurrentLevelInfo() {
 
 // Visual Style System - Each chapter has unique rendering style
 function getCurrentVisualStyle() {
+  // Custom levels carry their own style, picked in the editor
+  if (customLevelSession) return customLevelSession.chapter.visualStyle || 'default';
   const chapterInfo = getCurrentChapterInfo();
   return chapterInfo?.visualStyle || 'default';
 }
@@ -236,8 +238,24 @@ function updateSketchWobble(deltaTime) {
   sketchWobble += deltaTime * 2;
 }
 
+// ===== CUSTOM LEVELS (LEVEL EDITOR) =====
+// While the player is testing or playing one of their own levels the engine
+// reads the level from here instead of the built-in chapters.
+// Defined in src/editor/ - see custom_levels.js.
+let customLevelSession = null;
+
+// The level the engine should currently run (built-in level, or custom one)
+function getActiveLevelData() {
+  return customLevelSession ? customLevelSession.data : levels[currentLevel];
+}
+
+// The chapter that level belongs to (custom levels get a stand-in chapter)
+function getActiveChapterData() {
+  return customLevelSession ? customLevelSession.chapter : chapters[currentChapter];
+}
+
 // Game state
-let gameState = 'menu'; // 'menu', 'settings', 'chapterSelect', 'levelSelect', 'playing', 'levelComplete', 'paused'
+let gameState = 'menu'; // 'menu', 'settings', 'chapterSelect', 'levelSelect', 'playing', 'levelComplete', 'paused', 'customLevels', 'editor'
 let previousGameState = null; // Store previous state to return to after settings
 let currentChapter = 0;
 let currentLevel = 0;
@@ -554,6 +572,7 @@ function init() {
 
 // Load a specific level by chapter and level within chapter
 function loadLevelFromChapter(chapterIndex, levelInChapter) {
+  customLevelSession = null; // Built-in level: leave any custom level behind
   currentChapter = chapterIndex;
   currentLevelInChapter = levelInChapter;
   currentLevel = getGlobalLevelIndex(chapterIndex, levelInChapter);
@@ -566,6 +585,7 @@ function loadLevelFromChapter(chapterIndex, levelInChapter) {
 
 // Load a specific level by global index (for backwards compatibility)
 function loadLevel(globalLevelIndex) {
+  customLevelSession = null; // Built-in level: leave any custom level behind
   currentLevel = globalLevelIndex;
   currentChapter = getChapterFromGlobalLevel(globalLevelIndex);
   currentLevelInChapter = getLevelInChapterFromGlobalLevel(globalLevelIndex);
@@ -586,9 +606,10 @@ function parseLevel() {
   door = null;
   spawnPoint = null; // Reset custom spawn point for each level
 
-  const levelMap = levels[currentLevel].map;
-  const customTriggers = levels[currentLevel].spikeTriggers || []; // Get custom triggers if defined
-  const customTriggerLengths = levels[currentLevel].spikeTriggerLengths || []; // Get custom trigger lengths
+  const activeLevel = getActiveLevelData();
+  const levelMap = activeLevel.map;
+  const customTriggers = activeLevel.spikeTriggers || []; // Get custom triggers if defined
+  const customTriggerLengths = activeLevel.spikeTriggerLengths || []; // Get custom trigger lengths
   const defaultTriggerOffset = -0.5; // Changed from 2 to -0.5 - spikes trigger when player crosses them
 
   let spikeIndex = 0; // Track which spike we're on for custom triggers
@@ -688,8 +709,8 @@ function parseLevel() {
   // Parse gravity zones if feature is enabled
   if (ENABLE_GRAVITY_ZONES) {
     gravityZones = [];
-    const levelData = levels[currentLevel];
-    const chapterData = chapters[currentChapter];
+    const levelData = getActiveLevelData();
+    const chapterData = getActiveChapterData() || {};
     
     // First, detect 'G' and 'g' markers in the map to find zone boundaries
     const zoneMarkers = [];
@@ -853,6 +874,8 @@ function update(deltaTime) {
       transitionState = 'fadeIn';
       gameState = pendingGameState;
       pendingGameState = null;
+      // Let the editor screens clean up / refresh when they are entered
+      if (typeof onGameStateEntered === 'function') onGameStateEntered(gameState);
     }
     return; // Don't update game during transition
   } else if (transitionState === 'fadeIn') {
@@ -884,6 +907,12 @@ function update(deltaTime) {
     return;
   }
 
+  // Level editor screens (My Levels browser + the editor itself)
+  if (gameState === 'customLevels' || gameState === 'editor') {
+    if (typeof updateEditor === 'function') updateEditor(deltaTime);
+    return;
+  }
+
   // Paused state
   if (gameState === 'paused') {
     return;
@@ -892,6 +921,13 @@ function update(deltaTime) {
   // Level complete state
   if (gameState === 'levelComplete') {
     levelCompleteTimer -= deltaTime;
+
+    // A custom level goes back to wherever it was started from
+    if (customLevelSession) {
+      if (levelCompleteTimer <= 0) endCustomLevelSession();
+      return;
+    }
+
     if (levelCompleteTimer <= 0) {
       // Check if there are more levels in current chapter
       if (currentLevelInChapter < chapters[currentChapter].levels.length - 1) {
@@ -1287,7 +1323,17 @@ function update(deltaTime) {
 function completeLevel() {
   gameState = 'levelComplete';
   levelCompleteTimer = LEVEL_COMPLETE_DURATION;
-  
+
+  // Custom levels have their own records and never touch chapter progress
+  if (customLevelSession) {
+    if (customLevelSession.id && customLevelSession.returnState !== 'editor') {
+      recordCustomLevelWin(customLevelSession.id, levelDeaths, levelTime);
+    }
+    tryEnableAudio();
+    playSound('level_end');
+    return;
+  }
+
   // Mark this level as completed
   markLevelComplete(currentLevel);
   
@@ -1459,7 +1505,8 @@ function die() {
 function updateStats() {
   document.getElementById('deathCount').textContent = `Deaths: ${deaths}`;
   if (gameState === 'playing' || gameState === 'levelComplete') {
-    document.getElementById('levelName').textContent = levels[currentLevel].name;
+    const activeLevel = getActiveLevelData();
+    document.getElementById('levelName').textContent = activeLevel ? activeLevel.name : '';
   }
 }
 
@@ -2507,6 +2554,20 @@ function render() {
     return;
   }
 
+  // My Levels browser
+  if (gameState === 'customLevels') {
+    drawCustomLevelBrowser();
+    renderTransition();
+    return;
+  }
+
+  // Level editor
+  if (gameState === 'editor') {
+    drawEditor();
+    renderTransition();
+    return;
+  }
+
   // Don't return early for paused - we need to draw the game first
   // Then we'll draw the pause menu overlay on top
 
@@ -2741,7 +2802,10 @@ function render() {
     // Next level message
     ctx.font = '20px Arial, sans-serif';
     ctx.fillStyle = '#aaaaaa';
-    if (currentLevel < levels.length - 1) {
+    if (customLevelSession) {
+      ctx.fillText(customLevelSession.returnState === 'editor' ? 'Back to the editor...' : 'Back to your levels...',
+        canvas.width / 2, boxY + boxHeight - 30);
+    } else if (currentLevel < levels.length - 1) {
       ctx.fillText('Next level loading...', canvas.width / 2, boxY + boxHeight - 30);
     } else {
       ctx.fillText('You beat all levels!', canvas.width / 2, boxY + boxHeight - 50);
@@ -2838,9 +2902,13 @@ function render() {
     ctx.textAlign = 'left';
   }
   
+  // Banner while playing / testing a player-made level
+  if (customLevelSession && gameState === 'playing' && typeof drawCustomSessionOverlay === 'function') {
+    drawCustomSessionOverlay();
+  }
+
   // Draw pause menu overlay if paused (must be after game is drawn)
   if (gameState === 'paused') {
-    console.log('Drawing pause menu!'); // DEBUG
     drawPauseMenu();
   }
   
@@ -2959,7 +3027,11 @@ function drawPauseMenu() {
   ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 36px Impact, monospace';
-  ctx.fillText('QUIT TO MENU', canvas.width / 2, buttonY + 40);
+  let quitLabel = 'QUIT TO MENU';
+  if (customLevelSession) {
+    quitLabel = customLevelSession.returnState === 'editor' ? 'BACK TO EDITOR' : 'BACK TO MY LEVELS';
+  }
+  ctx.fillText(quitLabel, canvas.width / 2, buttonY + 40);
 
   // Instructions
   ctx.fillStyle = '#aaaaaa';
@@ -2988,57 +3060,46 @@ function drawMenu() {
 
   // Menu buttons
   window.menuButtons = [];
-  
-  // Start Game button
-  let startX = canvas.width / 2 - 150;
-  let startY = 300;
-  const startButton = { x: startX, y: startY, width: 300, height: 60, action: 'startGame', buttonIndex: 0 };
-  window.menuButtons.push(startButton);
-  
-  ctx.fillStyle = isButtonHovered(startButton) ? '#555555' : '#444444';
-  ctx.fillRect(startX, startY, 300, 60);
-  ctx.strokeStyle = isButtonHovered(startButton) ? '#aaaaaa' : '#888888';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(startX, startY, 300, 60);
-  
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '32px Arial, sans-serif';
-  ctx.fillText('START GAME', canvas.width / 2, startY + 40);
 
-  // Settings button
-  let settingsY = 380;
-  const settingsButton = { x: startX, y: settingsY, width: 300, height: 60, action: 'settings', buttonIndex: 1 };
-  window.menuButtons.push(settingsButton);
-  
-  ctx.fillStyle = isButtonHovered(settingsButton) ? '#555555' : '#444444';
-  ctx.fillRect(startX, settingsY, 300, 60);
-  ctx.strokeStyle = isButtonHovered(settingsButton) ? '#aaaaaa' : '#888888';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(startX, settingsY, 300, 60);
-  
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '32px Arial, sans-serif';
-  ctx.fillText('SETTINGS', canvas.width / 2, settingsY + 40);
+  const menuEntries = [
+    { label: 'START GAME', action: 'startGame' },
+    { label: 'MY LEVELS',  action: 'levelEditor', accent: '#8c44ff' },
+    { label: 'CUSTOMIZE',  action: 'customize' },
+    { label: 'SETTINGS',   action: 'settings' }
+  ];
 
-  // Customize button
-  let customizeY = 460;
-  const customizeButton = { x: startX, y: customizeY, width: 300, height: 60, action: 'customize', buttonIndex: 2 };
-  window.menuButtons.push(customizeButton);
-  
-  ctx.fillStyle = isButtonHovered(customizeButton) ? '#555555' : '#444444';
-  ctx.fillRect(startX, customizeY, 300, 60);
-  ctx.strokeStyle = isButtonHovered(customizeButton) ? '#aaaaaa' : '#888888';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(startX, customizeY, 300, 60);
-  
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '32px Arial, sans-serif';
-  ctx.fillText('CUSTOMIZE', canvas.width / 2, customizeY + 40);
+  const startX = canvas.width / 2 - 150;
+  const firstButtonY = 280;
+  const buttonSpacing = 76;
+
+  menuEntries.forEach((entry, index) => {
+    const button = {
+      x: startX,
+      y: firstButtonY + index * buttonSpacing,
+      width: 300,
+      height: 60,
+      action: entry.action,
+      buttonIndex: index
+    };
+    window.menuButtons.push(button);
+
+    const hovered = isButtonHovered(button);
+    ctx.fillStyle = hovered ? '#555555' : '#444444';
+    ctx.fillRect(button.x, button.y, button.width, button.height);
+    ctx.strokeStyle = hovered ? (entry.accent || '#aaaaaa') : (entry.accent || '#888888');
+    ctx.lineWidth = 3;
+    ctx.strokeRect(button.x, button.y, button.width, button.height);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '32px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(entry.label, canvas.width / 2, button.y + 40);
+  });
 
   // Instructions
   ctx.fillStyle = '#666666';
-  ctx.font = '26px monospace';
-  ctx.fillText('Hint: DISBELIEVE WHAT YOU SEE', canvas.width / 2, canvas.height - 50);
+  ctx.font = '22px monospace';
+  ctx.fillText('Hint: DISBELIEVE WHAT YOU SEE', canvas.width / 2, canvas.height - 30);
 
   ctx.textAlign = 'left';
 }
@@ -4048,9 +4109,17 @@ function handleClick(event) {
         } else if (button.action === 'customize') {
           previousGameState = gameState;
           transitionToState('customize');
+        } else if (button.action === 'levelEditor') {
+          openCustomLevelBrowser();
         }
       }
     });
+  }
+
+  // My Levels browser (level editor hub)
+  if (gameState === 'customLevels') {
+    handleCustomLevelClick(x, y);
+    return;
   }
 
   // Check customization buttons
@@ -4152,13 +4221,18 @@ function handleClick(event) {
         if (button.action === 'resume') {
           gameState = 'playing';
         } else if (button.action === 'restart') {
-          loadLevel(currentLevel);
-          gameState = 'playing';
+          if (customLevelSession) {
+            restartCustomLevelSession();
+          } else {
+            loadLevel(currentLevel);
+            gameState = 'playing';
+          }
         } else if (button.action === 'settings') {
           previousGameState = 'playing'; // Return to playing after settings
           transitionToState('settings');
         } else if (button.action === 'quit') {
-          transitionToState('menu');
+          if (customLevelSession) endCustomLevelSession();
+          else transitionToState('menu');
         }
       }
     });
@@ -4169,6 +4243,9 @@ function handleClick(event) {
 window.addEventListener('keydown', (e) => {
   // Enable audio on any key press
   tryEnableAudio();
+
+  // The level editor screens handle their own keys (see src/editor/)
+  if (gameState === 'editor' || gameState === 'customLevels') return;
 
   // Track keypresses for cheat code (only letters)
   if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) {
@@ -4256,6 +4333,8 @@ window.addEventListener('keydown', (e) => {
           } else if (button.action === 'customize') {
             previousGameState = gameState;
             transitionToState('customize');
+          } else if (button.action === 'levelEditor') {
+            openCustomLevelBrowser();
           }
         }
         
@@ -4291,13 +4370,18 @@ window.addEventListener('keydown', (e) => {
           if (button.action === 'resume') {
             gameState = 'playing';
           } else if (button.action === 'restart') {
-            loadLevel(currentLevel);
-            gameState = 'playing';
+            if (customLevelSession) {
+              restartCustomLevelSession();
+            } else {
+              loadLevel(currentLevel);
+              gameState = 'playing';
+            }
           } else if (button.action === 'settings') {
             previousGameState = 'playing';
             transitionToState('settings');
           } else if (button.action === 'quit') {
-            transitionToState('menu');
+            if (customLevelSession) endCustomLevelSession();
+            else transitionToState('menu');
           }
         }
         
@@ -4327,6 +4411,15 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.code === 'KeyR') {
     keys.r = true;
+    // Quick restart of the current level
+    if (gameState === 'playing') {
+      if (customLevelSession) {
+        restartCustomLevelSession();
+      } else {
+        loadLevel(currentLevel);
+        gameState = 'playing';
+      }
+    }
   }
 
   // Debug mode toggle
@@ -4408,7 +4501,12 @@ window.addEventListener('keydown', (e) => {
   // ESC key handling for different states
   if (e.code === 'Escape') {
     if (gameState === 'playing') {
-      gameState = 'paused';
+      // Testing from the editor: go straight back to building
+      if (customLevelSession && customLevelSession.returnState === 'editor') {
+        endCustomLevelSession();
+      } else {
+        gameState = 'paused';
+      }
     } else if (gameState === 'paused') {
       gameState = 'playing';
     } else if (gameState === 'settings') {
