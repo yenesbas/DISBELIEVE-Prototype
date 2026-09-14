@@ -29,16 +29,26 @@ Here's what awaits you in DISBELIEVE:
 
 ## 🛠 Build Your Own Levels
 
-DISBELIEVE ships with a full level editor. Pick **MY LEVELS** in the main menu.
+DISBELIEVE ships with a full level editor behind **MY LEVELS** in the main menu.
+
+**It has to be earned.** The button is there from the start but stays locked
+until you finish every level of every chapter *and* hold a two-star average
+across all of them - 30 levels and 60 of the 90 stars once all three chapters
+are full. The menu shows how many levels and stars you still need.
 
 Traps are built by hand, right on the map - there is not a single number box in
 the editor:
 
 - **Paint** platforms, fake blocks, invisible blocks and crumbling blocks by
   dragging the mouse (hold SHIFT to fill a rectangle).
-- **Drop a spike**, then drag its *ghost* to set how far it shoots, drag its
-  *yellow line* to set where the player sets it off, and drag the *round handle*
-  to set how tall that trigger is.
+- **Drop a spike**, then drag its *ghost* to aim it: spikes shoot in any of
+  **eight directions**, not just to the right.
+- **Set its speed** from a slow creep you can outrun to an instant snap.
+- **Put its trigger anywhere** on the map - drag the trigger itself to move it,
+  and drag either round handle to say where it starts and where it ends. Pull it
+  sideways and the trigger line becomes a trigger *box*.
+- **Move a finished trap** by dragging the spike; its trigger, direction and
+  speed all come along.
 - **TEST PLAY** the level at any moment, then ESC straight back to building.
 - **Export** a level to a file and send it to a friend, or **import** theirs.
 
@@ -48,9 +58,11 @@ instructions: [`src/editor/EDITOR_GUIDE.md`](src/editor/EDITOR_GUIDE.md)
 ## 🏆 Features
 
 - Increasingly challenging levels
-- Deceptive traps and moving spikes
+- Deceptive traps and spikes that shoot in any of eight directions, at any speed
+- Triggers that can sit anywhere on the map, as a line or as a box
 - Fake platforms that look solid but aren't
-- A level editor with drag-to-tune traps, plus level sharing
+- A level editor with drag-to-tune traps, plus level sharing - unlocked by
+  clearing all three chapters with a two-star average
 - Death counter to track your attempts
 - Atmospheric sound effects and music
 - Instant respawn system
