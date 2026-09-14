@@ -18,6 +18,64 @@ const SPIKE_TRIGGER_DISTANCE = 420;
 const SPIKE_MOVE_DISTANCE = TILE_SIZE * 2;
 const COYOTE_TIME_DURATION = 0.1; // 100ms window to jump after leaving platform
 
+// ===== SPIKE TRAPS =====
+// A spike travels `digit` tiles (the character on the map) along one of these
+// unit vectors, so a diagonal trap covers exactly the same distance as a
+// straight one. 'right' is the classic behaviour and stays the default.
+const SPIKE_DIRECTIONS = {
+  right:     { dx:  1, dy:  0, arrow: '\u2192' },
+  left:      { dx: -1, dy:  0, arrow: '\u2190' },
+  up:        { dx:  0, dy: -1, arrow: '\u2191' },
+  down:      { dx:  0, dy:  1, arrow: '\u2193' },
+  upRight:   { dx:  Math.SQRT1_2, dy: -Math.SQRT1_2, arrow: '\u2197' },
+  upLeft:    { dx: -Math.SQRT1_2, dy: -Math.SQRT1_2, arrow: '\u2196' },
+  downRight: { dx:  Math.SQRT1_2, dy:  Math.SQRT1_2, arrow: '\u2198' },
+  downLeft:  { dx: -Math.SQRT1_2, dy:  Math.SQRT1_2, arrow: '\u2199' }
+};
+const SPIKE_DIRECTION_IDS = Object.keys(SPIKE_DIRECTIONS);
+const DEFAULT_SPIKE_DIRECTION = 'right';
+
+// How quickly a triggered spike covers its distance: the dash takes
+// 1 / speed seconds, so 5 is the classic 0.2s snap and 1 is a slow creep.
+const DEFAULT_SPIKE_SPEED = 5;
+const MIN_SPIKE_SPEED = 0.5;
+const MAX_SPIKE_SPEED = 20;
+
+function normalizeSpikeDirection(name) {
+  return SPIKE_DIRECTIONS[name] ? name : DEFAULT_SPIKE_DIRECTION;
+}
+
+function getSpikeDirectionVector(name) {
+  return SPIKE_DIRECTIONS[normalizeSpikeDirection(name)];
+}
+
+function normalizeSpikeSpeed(value) {
+  const speed = Number(value);
+  if (!isFinite(speed) || speed <= 0) return DEFAULT_SPIKE_SPEED;
+  return Math.max(MIN_SPIKE_SPEED, Math.min(MAX_SPIKE_SPEED, speed));
+}
+
+// Closest of the eight directions to a free vector - used by the editor when
+// the ghost block is dragged somewhere off-axis.
+function spikeDirectionFromVector(dx, dy) {
+  if (dx === 0 && dy === 0) return DEFAULT_SPIKE_DIRECTION;
+  const length = Math.sqrt(dx * dx + dy * dy);
+  const ux = dx / length;
+  const uy = dy / length;
+
+  let best = DEFAULT_SPIKE_DIRECTION;
+  let bestDot = -Infinity;
+  SPIKE_DIRECTION_IDS.forEach(id => {
+    const v = SPIKE_DIRECTIONS[id];
+    const dot = ux * v.dx + uy * v.dy;
+    if (dot > bestDot) {
+      bestDot = dot;
+      best = id;
+    }
+  });
+  return best;
+}
+
 // Crumbling platform constants (Chapter 3 mechanic)
 const CRUMBLE_DELAY = 0.6;           // Seconds player stands on it before it falls
 const CRUMBLE_FALL_DURATION = 0.35;  // Seconds the fall animation takes
@@ -423,6 +481,81 @@ function isTrailUnlocked(trail) {
   return isChapterCompleted(trail.unlockChapter);
 }
 
+// ===== LEVEL EDITOR UNLOCK =====
+// The editor is earned, not given: every story level has to be finished AND
+// the player needs a two-star average across all of them. With three full
+// chapters that is 30 levels and 60 of the 90 possible stars.
+const EDITOR_UNLOCK_STAR_AVERAGE = 2;
+
+function getStoryLevelTotal() {
+  // Bonus levels are optional, so they never count towards the unlock
+  return chapters.reduce((total, chapter) => total + chapter.levels.length, 0);
+}
+
+// Everything the menu needs to show how close the player is
+function getEditorUnlockProgress() {
+  const totalLevels = getStoryLevelTotal();
+  let completed = 0;
+  let stars = 0;
+
+  chapters.forEach((chapter, chapterIndex) => {
+    for (let i = 0; i < chapter.levels.length; i++) {
+      const globalIndex = getGlobalLevelIndex(chapterIndex, i);
+      if (completedLevels.has(globalIndex)) completed++;
+      stars += levelStars[globalIndex] || 0;
+    }
+  });
+
+  const requiredStars = totalLevels * EDITOR_UNLOCK_STAR_AVERAGE;
+  return {
+    totalLevels: totalLevels,
+    completed: completed,
+    stars: stars,
+    requiredStars: requiredStars,
+    maxStars: totalLevels * 3,
+    levelsLeft: Math.max(0, totalLevels - completed),
+    starsLeft: Math.max(0, requiredStars - stars),
+    unlocked: completed >= totalLevels && stars >= requiredStars
+  };
+}
+
+function isLevelEditorUnlocked() {
+  if (DEVELOPER_MODE) return true; // Developer mode unlocks everything
+  return getEditorUnlockProgress().unlocked;
+}
+
+// Short line explaining what is still missing, for the locked menu button
+function getEditorUnlockHint() {
+  const progress = getEditorUnlockProgress();
+  if (progress.unlocked) return '';
+
+  const parts = [];
+  if (progress.levelsLeft > 0) {
+    parts.push(progress.levelsLeft + (progress.levelsLeft === 1 ? ' level left' : ' levels left'));
+  }
+  if (progress.starsLeft > 0) {
+    parts.push(progress.starsLeft + ' more \u2605');
+  }
+  return 'Finish all ' + progress.totalLevels + ' levels with ' + progress.requiredStars +
+         '\u2605 to unlock  \u2022  ' + parts.join('  \u2022  ');
+}
+
+// Menu notice shown when a locked option is clicked
+let menuNotice = '';
+let menuNoticeTimer = 0;
+
+// Single entry point for the MY LEVELS button, from mouse and keyboard alike
+function tryOpenLevelEditor() {
+  if (!isLevelEditorUnlocked()) {
+    const progress = getEditorUnlockProgress();
+    menuNotice = 'LOCKED - you have ' + progress.completed + '/' + progress.totalLevels +
+                 ' levels and ' + progress.stars + '/' + progress.requiredStars + ' \u2605 needed';
+    menuNoticeTimer = 4;
+    return;
+  }
+  openCustomLevelBrowser();
+}
+
 function getBonusLevelGlobalIndex(chapterIndex) {
   // Calculate global index for bonus level
   // Bonus levels are placed after regular levels: chapter levels + previous bonus levels
@@ -610,6 +743,9 @@ function parseLevel() {
   const levelMap = activeLevel.map;
   const customTriggers = activeLevel.spikeTriggers || []; // Get custom triggers if defined
   const customTriggerLengths = activeLevel.spikeTriggerLengths || []; // Get custom trigger lengths
+  const customTriggerAreas = activeLevel.spikeTriggerAreas || []; // Free-form trigger rectangles
+  const customDirections = activeLevel.spikeDirections || []; // Which way each spike shoots
+  const customSpeeds = activeLevel.spikeSpeeds || []; // How fast each spike shoots
   const defaultTriggerOffset = -0.5; // Changed from 2 to -0.5 - spikes trigger when player crosses them
 
   let spikeIndex = 0; // Track which spike we're on for custom triggers
@@ -638,36 +774,50 @@ function parseLevel() {
         });
       } else if (/^[0-9]$/.test(char) || char === '^') {
         // Handle spikes with movement distances 0-9 or backward compatibility '^'
-        let moveDistance;
-        if (char === '^') {
-          moveDistance = TILE_SIZE * 2; // backward compatibility
+        const moveTiles = char === '^' ? 2 : parseInt(char, 10);
+        const moveDistance = TILE_SIZE * moveTiles;
+
+        // Which way it shoots, and how fast it covers that distance
+        const direction = normalizeSpikeDirection(customDirections[spikeIndex]);
+        const vector = getSpikeDirectionVector(direction);
+        const moveSpeed = normalizeSpikeSpeed(customSpeeds[spikeIndex]);
+
+        const spikeTopY = y + 20; // Spike's actual visual y position (top)
+
+        // The trigger: an explicit rectangle wins when the level defines one,
+        // otherwise the classic vertical line built from spikeTriggers /
+        // spikeTriggerLengths. Areas are stored relative to the spike's tile,
+        // so a trap keeps its shape when the spike is moved in the editor.
+        const area = customTriggerAreas[spikeIndex];
+        let triggerX, triggerY, triggerWidth, triggerHeight;
+        let triggerOffset, triggerLength;
+
+        if (area && typeof area === 'object') {
+          triggerX = x + (Number(area.x) || 0);
+          triggerY = y + (Number(area.y) || 0);
+          triggerWidth = Math.max(0, Number(area.w) || 0);
+          triggerHeight = Math.max(0, Number(area.h) || 0);
+          triggerOffset = (x - triggerX) / TILE_SIZE; // debug display only
+          triggerLength = null;
         } else {
-          moveDistance = TILE_SIZE * parseInt(char, 10);
-        }
+          // Determine trigger position (vertical line to the left of spike)
+          triggerOffset = customTriggers[spikeIndex] !== undefined
+            ? customTriggers[spikeIndex]
+            : defaultTriggerOffset;
 
-        // Determine trigger position (vertical line to the left of spike)
-        const triggerOffset = customTriggers[spikeIndex] !== undefined
-          ? customTriggers[spikeIndex]
-          : defaultTriggerOffset;
+          triggerX = x - (triggerOffset * TILE_SIZE); // Position of vertical trigger line
+          triggerWidth = 0; // A bare line: the player only has to cross it
 
-        const triggerX = x - (triggerOffset * TILE_SIZE); // Position of vertical trigger line
+          // Determine trigger length (vertical span)
+          triggerLength = customTriggerLengths[spikeIndex] !== undefined && customTriggerLengths[spikeIndex] !== null
+            ? customTriggerLengths[spikeIndex]
+            : null; // null means full-height
 
-        // Determine trigger length (vertical span)
-        const triggerLength = customTriggerLengths[spikeIndex] !== undefined && customTriggerLengths[spikeIndex] !== null
-          ? customTriggerLengths[spikeIndex]
-          : null; // null means full-height
-
-        // Calculate trigger vertical bounds
-        let triggerY, triggerHeight;
-        if (triggerLength === null || triggerLength === 0) {
-          // Full-height trigger (default behavior)
-          triggerY = 0;
-          triggerHeight = canvas.height;
-        } else {
-          // Limited-height trigger from spike top
-          const spikeTopY = y + 20; // Spike's actual visual y position (top)
-
-          if (triggerLength > 0) {
+          if (triggerLength === null || triggerLength === 0) {
+            // Full-height trigger (default behavior)
+            triggerY = 0;
+            triggerHeight = canvas.height;
+          } else if (triggerLength > 0) {
             // POSITIVE: extends UPWARD from spike top
             triggerY = spikeTopY - triggerLength;
             triggerHeight = triggerLength;
@@ -680,13 +830,19 @@ function parseLevel() {
 
         spikes.push({
           x: x,
-          y: y + 20,
+          y: spikeTopY,
           originalX: x,
+          originalY: spikeTopY,
           width: TILE_SIZE,
           height: TILE_SIZE - 20, // Slightly shorter spike
           moveDistance: moveDistance, // Custom movement distance per spike
-          triggerX: triggerX, // X position where trigger line is located
-          triggerY: triggerY, // Y position where trigger line starts
+          moveX: vector.dx * moveDistance, // Travel along X once triggered
+          moveY: vector.dy * moveDistance, // Travel along Y once triggered
+          direction: direction, // One of SPIKE_DIRECTIONS
+          moveSpeed: moveSpeed, // Dash takes 1 / moveSpeed seconds
+          triggerX: triggerX, // X position where the trigger starts
+          triggerY: triggerY, // Y position where the trigger starts
+          triggerWidth: triggerWidth, // Width of the trigger (0 = a bare line)
           triggerHeight: triggerHeight, // Height of trigger line
           triggerOffset: triggerOffset, // How many tiles left (for debug display)
           triggerLength: triggerLength, // Length in pixels (null = full height)
@@ -844,6 +1000,7 @@ function resetPlayer() {
   // Reset all spikes
   spikes.forEach(spike => {
     spike.x = spike.originalX;
+    spike.y = spike.originalY;
     spike.triggered = false;
     spike.moved = false;
     spike.moving = false;
@@ -865,7 +1022,10 @@ function resetPlayer() {
 // Update game state
 function update(deltaTime) {
   // Visual effects are now static - no animation updates needed
-  
+
+  // Fade out the "still locked" note on the main menu
+  if (menuNoticeTimer > 0) menuNoticeTimer = Math.max(0, menuNoticeTimer - deltaTime);
+
   // Handle transitions
   if (transitionState === 'fadeOut') {
     transitionAlpha += transitionSpeed * deltaTime;
@@ -1266,16 +1426,17 @@ function update(deltaTime) {
   // Update moving spikes
   spikes.forEach(spike => {
     if (spike.moving) {
-      spike.moveTimer += deltaTime * 5;
+      // The dash takes 1 / moveSpeed seconds, whatever the distance
+      spike.moveTimer += deltaTime * spike.moveSpeed;
       if (spike.moveTimer >= 1) {
         spike.moveTimer = 1;
         spike.moving = false;
         spike.moved = true;
       }
 
-      // Interpolate position using spike's custom moveDistance
-      const targetX = spike.originalX + spike.moveDistance;
-      spike.x = spike.originalX + (targetX - spike.originalX) * spike.moveTimer;
+      // Interpolate along the spike's own travel vector (any of 8 directions)
+      spike.x = spike.originalX + spike.moveX * spike.moveTimer;
+      spike.y = spike.originalY + spike.moveY * spike.moveTimer;
     }
   });
 
@@ -1364,11 +1525,14 @@ function checkSpikeTriggers() {
       // Check if player is within the vertical bounds of the trigger
       const withinVerticalBounds = (playerBottom >= spike.triggerY) && (playerTop <= spike.triggerY + spike.triggerHeight);
 
-      // Check if player is currently crossing through the trigger line (left edge before line, right edge after line)
-      const currentlyCrossingLine = (playerLeftEdge < spike.triggerX) && (playerRightEdge >= spike.triggerX);
+      // A trigger with a width is a box the player has to touch; a trigger
+      // without one is the classic line the player has to cross.
+      const withinHorizontalBounds = spike.triggerWidth > 0
+        ? (playerRightEdge >= spike.triggerX) && (playerLeftEdge <= spike.triggerX + spike.triggerWidth)
+        : (playerLeftEdge < spike.triggerX) && (playerRightEdge >= spike.triggerX);
 
-      // Trigger when player actively crosses through the line AND is within vertical bounds
-      if (currentlyCrossingLine && withinVerticalBounds) {
+      // Trigger when the player is inside the trigger on both axes
+      if (withinHorizontalBounds && withinVerticalBounds) {
         spike.triggered = true;
         spike.moving = true;
         spike.moveTimer = 0;
@@ -2015,7 +2179,8 @@ function updateTriggerInfo() {
   let infoText = 'Spike Triggers: ';
   spikes.forEach((spike, index) => {
     const status = spike.moved ? '✓' : (spike.triggered ? '→' : '○');
-    infoText += `[${index + 1}: -${spike.triggerOffset} tiles ${status}] `;
+    const arrow = getSpikeDirectionVector(spike.direction).arrow;
+    infoText += `[${index + 1}: ${arrow}${spike.moveDistance / TILE_SIZE} @x${spike.moveSpeed} ${status}] `;
   });
 
   triggerInfoElement.textContent = infoText;
@@ -2636,24 +2801,37 @@ function render() {
       ctx.strokeStyle = 'rgba(255, 255, 0, 0.3)'; // Yellow, transparent
       ctx.lineWidth = 2;
       ctx.setLineDash([5, 5]); // Dashed line
-      ctx.beginPath();
-      ctx.moveTo(spike.triggerX, spike.triggerY);
-      ctx.lineTo(spike.triggerX, spike.triggerY + spike.triggerHeight);
-      ctx.stroke();
+
+      if (spike.triggerWidth > 0) {
+        // Free-form trigger box
+        ctx.fillStyle = 'rgba(255, 255, 0, 0.08)';
+        ctx.fillRect(spike.triggerX, spike.triggerY, spike.triggerWidth, spike.triggerHeight);
+        ctx.strokeRect(spike.triggerX, spike.triggerY, spike.triggerWidth, spike.triggerHeight);
+      } else {
+        // Classic trigger line
+        ctx.beginPath();
+        ctx.moveTo(spike.triggerX, spike.triggerY);
+        ctx.lineTo(spike.triggerX, spike.triggerY + spike.triggerHeight);
+        ctx.stroke();
+      }
       ctx.setLineDash([]); // Reset to solid line
 
-      // Draw small label showing trigger offset and length
+      // Draw small label showing the trap's shape, direction and speed
       ctx.fillStyle = 'rgba(255, 255, 0, 0.6)';
       ctx.font = '12px monospace';
-      let lengthLabel;
-      if (spike.triggerLength === null || spike.triggerLength === 0) {
-        lengthLabel = 'full';
+      let shapeLabel;
+      if (spike.triggerWidth > 0) {
+        shapeLabel = `${Math.round(spike.triggerWidth)}x${Math.round(spike.triggerHeight)}px`;
+      } else if (spike.triggerLength === null || spike.triggerLength === 0) {
+        shapeLabel = 'full';
       } else if (spike.triggerLength > 0) {
-        lengthLabel = `↑${spike.triggerLength}px`;
+        shapeLabel = `↑${spike.triggerLength}px`;
       } else {
-        lengthLabel = `↓${Math.abs(spike.triggerLength)}px`;
+        shapeLabel = `↓${Math.abs(spike.triggerLength)}px`;
       }
-      ctx.fillText(`-${spike.triggerOffset} [${lengthLabel}]`, spike.triggerX - 15, spike.y - 5);
+      const arrow = getSpikeDirectionVector(spike.direction).arrow;
+      ctx.fillText(`${arrow}${spike.moveDistance / TILE_SIZE} [${shapeLabel}] x${spike.moveSpeed}`,
+        spike.triggerX - 15, spike.y - 5);
     }
 
     // Draw spike with visual style
@@ -3072,33 +3250,73 @@ function drawMenu() {
   const firstButtonY = 280;
   const buttonSpacing = 76;
 
+  // MY LEVELS stays visible but locked until the story is beaten well enough
+  const editorUnlocked = isLevelEditorUnlocked();
+  let editorButtonY = 0;
+
   menuEntries.forEach((entry, index) => {
+    const locked = entry.action === 'levelEditor' && !editorUnlocked;
     const button = {
       x: startX,
       y: firstButtonY + index * buttonSpacing,
       width: 300,
       height: 60,
       action: entry.action,
-      buttonIndex: index
+      buttonIndex: index,
+      locked: locked
     };
     window.menuButtons.push(button);
+    if (entry.action === 'levelEditor') editorButtonY = button.y;
 
     const hovered = isButtonHovered(button);
-    ctx.fillStyle = hovered ? '#555555' : '#444444';
-    ctx.fillRect(button.x, button.y, button.width, button.height);
-    ctx.strokeStyle = hovered ? (entry.accent || '#aaaaaa') : (entry.accent || '#888888');
+    if (locked) {
+      ctx.fillStyle = hovered ? '#3a3a3a' : '#333333';
+      ctx.fillRect(button.x, button.y, button.width, button.height);
+      ctx.strokeStyle = hovered ? '#777777' : '#5a5a5a';
+    } else {
+      ctx.fillStyle = hovered ? '#555555' : '#444444';
+      ctx.fillRect(button.x, button.y, button.width, button.height);
+      ctx.strokeStyle = hovered ? (entry.accent || '#aaaaaa') : (entry.accent || '#888888');
+    }
     ctx.lineWidth = 3;
     ctx.strokeRect(button.x, button.y, button.width, button.height);
 
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = locked ? '#8a8a8a' : '#ffffff';
     ctx.font = '32px Arial, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(entry.label, canvas.width / 2, button.y + 40);
+    ctx.fillText(locked ? '\u{1F512} ' + entry.label : entry.label, canvas.width / 2, button.y + 40);
   });
+
+  // What is still missing before the editor opens
+  if (!editorUnlocked) {
+    const progress = getEditorUnlockProgress();
+    ctx.fillStyle = '#7a6f9a';
+    ctx.font = '15px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(getEditorUnlockHint(), canvas.width / 2, editorButtonY + 78);
+
+    // A small progress bar for the star requirement
+    const barW = 300;
+    const barX = canvas.width / 2 - barW / 2;
+    const barY = editorButtonY + 86;
+    ctx.fillStyle = '#333333';
+    ctx.fillRect(barX, barY, barW, 6);
+    ctx.fillStyle = '#8c44ff';
+    ctx.fillRect(barX, barY, barW * Math.min(1, progress.stars / progress.requiredStars), 6);
+  }
+
+  // Feedback after clicking something that is still locked
+  if (menuNoticeTimer > 0 && menuNotice) {
+    ctx.fillStyle = '#ff8866';
+    ctx.font = 'bold 18px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(menuNotice, canvas.width / 2, canvas.height - 62);
+  }
 
   // Instructions
   ctx.fillStyle = '#666666';
   ctx.font = '22px monospace';
+  ctx.textAlign = 'center';
   ctx.fillText('Hint: DISBELIEVE WHAT YOU SEE', canvas.width / 2, canvas.height - 30);
 
   ctx.textAlign = 'left';
@@ -4110,7 +4328,7 @@ function handleClick(event) {
           previousGameState = gameState;
           transitionToState('customize');
         } else if (button.action === 'levelEditor') {
-          openCustomLevelBrowser();
+          tryOpenLevelEditor();
         }
       }
     });
@@ -4334,7 +4552,7 @@ window.addEventListener('keydown', (e) => {
             previousGameState = gameState;
             transitionToState('customize');
           } else if (button.action === 'levelEditor') {
-            openCustomLevelBrowser();
+            tryOpenLevelEditor();
           }
         }
         

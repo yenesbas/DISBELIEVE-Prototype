@@ -13,6 +13,7 @@
  *     {
  *       id: "lvl_...", name: "My Level", visualStyle: "default",
  *       map: ["....", ...], spikeTriggers: [...], spikeTriggerLengths: [...],
+ *       spikeTriggerAreas: [...], spikeDirections: [...], spikeSpeeds: [...],
  *       created: 1700000000000, modified: 1700000000000,
  *       stats: { plays: 0, wins: 0, bestDeaths: null, bestTime: null }
  *     }
@@ -71,6 +72,9 @@ function createNewCustomLevel(name) {
     map: createStarterMap(),
     spikeTriggers: [],
     spikeTriggerLengths: [],
+    spikeTriggerAreas: [],
+    spikeDirections: [],
+    spikeSpeeds: [],
     created: now,
     modified: now,
     stats: { plays: 0, wins: 0, bestDeaths: null, bestTime: null }
@@ -112,6 +116,40 @@ function sanitizeNumberArray(arr, allowNull) {
   });
 }
 
+// Spike travel directions and speeds are validated by the engine's own helpers,
+// so an imported file can never invent a direction the game does not know.
+function sanitizeDirectionArray(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.slice(0, 400).map(value => normalizeSpikeDirection(value));
+}
+
+function sanitizeSpeedArray(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.slice(0, 400).map(value => normalizeSpikeSpeed(value));
+}
+
+// A trigger area is a rectangle in pixels, relative to the spike's own tile.
+// null means "this spike still uses the classic trigger line".
+function sanitizeTriggerAreaArray(arr) {
+  if (!Array.isArray(arr)) return [];
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+  return arr.slice(0, 400).map(value => {
+    if (!value || typeof value !== 'object') return null;
+    const x = Number(value.x);
+    const y = Number(value.y);
+    const w = Number(value.w);
+    const h = Number(value.h);
+    if (!isFinite(x) || !isFinite(y) || !isFinite(w) || !isFinite(h)) return null;
+    return {
+      x: clamp(x, -4000, 4000),
+      y: clamp(y, -4000, 4000),
+      w: clamp(w, 0, 4000),
+      h: clamp(h, 0, 4000)
+    };
+  });
+}
+
 function sanitizeStats(stats) {
   const safe = { plays: 0, wins: 0, bestDeaths: null, bestTime: null };
   if (!stats || typeof stats !== 'object') return safe;
@@ -142,6 +180,9 @@ function sanitizeCustomLevel(level) {
     map: sanitizeLevelMap(level.map),
     spikeTriggers: sanitizeNumberArray(level.spikeTriggers, false),
     spikeTriggerLengths: sanitizeNumberArray(level.spikeTriggerLengths, true),
+    spikeTriggerAreas: sanitizeTriggerAreaArray(level.spikeTriggerAreas),
+    spikeDirections: sanitizeDirectionArray(level.spikeDirections),
+    spikeSpeeds: sanitizeSpeedArray(level.spikeSpeeds),
     created: isFinite(level.created) ? level.created : now,
     modified: isFinite(level.modified) ? level.modified : now,
     stats: sanitizeStats(level.stats)
@@ -257,6 +298,9 @@ function customLevelToPlayable(level) {
     map: level.map.slice(),
     spikeTriggers: level.spikeTriggers.slice(),
     spikeTriggerLengths: level.spikeTriggerLengths.slice(),
+    spikeTriggerAreas: (level.spikeTriggerAreas || []).map(area => area ? Object.assign({}, area) : null),
+    spikeDirections: (level.spikeDirections || []).slice(),
+    spikeSpeeds: (level.spikeSpeeds || []).slice(),
     visualStyle: level.visualStyle,
     isCustom: true
   };
@@ -272,7 +316,10 @@ function customLevelToShareObject(level) {
     visualStyle: level.visualStyle,
     map: level.map,
     spikeTriggers: level.spikeTriggers,
-    spikeTriggerLengths: level.spikeTriggerLengths
+    spikeTriggerLengths: level.spikeTriggerLengths,
+    spikeTriggerAreas: level.spikeTriggerAreas,
+    spikeDirections: level.spikeDirections,
+    spikeSpeeds: level.spikeSpeeds
   };
 }
 

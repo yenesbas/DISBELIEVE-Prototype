@@ -3,8 +3,9 @@
  *
  * Everything is edited directly on the map: you paint tiles with the mouse and
  * you shape a spike's trap by DRAGGING it - the ghost shows where the spike
- * will shoot to, the vertical line is its trigger, and the round handle on the
- * end of that line is how long the trigger is. No number boxes anywhere.
+ * will shoot to (any of eight directions), and the yellow trigger can be
+ * dragged anywhere on the map and resized from either end. No number boxes
+ * anywhere; direction and speed are picked from icons in the palette.
  *
  * The editor draws the level with the real game renderers, so what you build
  * is exactly what you play.
@@ -18,6 +19,11 @@ const ED_TILE = 50;          // On-screen size of one tile inside the editor
 const ED_GRID_X = 195;
 const ED_GRID_Y = 66;
 const ED_SCALE = ED_TILE / TILE_SIZE; // World (60px tiles) -> editor pixels
+const ED_TOOLS_Y = 86;       // First tool button
+const ED_TOOL_H = 36;
+const ED_TOOL_STEP = 38;
+const ED_SPIKE_Y = 478;      // Spike controls start here
+const ED_SPIKE_DIR_Y = 580;  // Direction pad / speed stepper row
 const ED_GRID_W = EDITOR_COLS * ED_TILE;
 const ED_GRID_H = EDITOR_ROWS * ED_TILE;
 
@@ -36,12 +42,12 @@ const EDITOR_TOOLS = [
 ];
 
 const EDITOR_TOOL_HINTS = {
-  select: 'SELECT: click a spike to tune it by dragging. Also drags SPAWN and DOOR.',
+  select: 'SELECT: click a spike, then drag its ghost, its trigger, or the spike itself. Also drags SPAWN and DOOR.',
   block:  'SOLID: normal platform. Drag to paint, hold SHIFT for a rectangle.',
   fake:   'FAKE: looks solid, player falls straight through it.',
   invisible: 'HIDDEN: solid but completely invisible while playing.',
   crumble: 'CRUMBLE: breaks away shortly after the player stands on it.',
-  spike:  'SPIKE: click to place. It is selected at once, ready to drag.',
+  spike:  'SPIKE: click to place. It is selected at once, ready to aim and drag.',
   gravity: 'GRAVITY: paint a zone. Connected tiles become one flip zone.',
   spawn:  'SPAWN: where the player starts. Only one per level.',
   door:   'DOOR: the exit. Only one per level.',
@@ -51,10 +57,24 @@ const EDITOR_TOOL_HINTS = {
 // Default trigger offset used by the game when a level defines none.
 const ED_DEFAULT_TRIGGER = -0.5;
 
+// Snapping while dragging a trigger: normal / SHIFT (half a tile) / ALT (free)
+const ED_TRIGGER_SNAP = 10;
+const ED_TRIGGER_SNAP_COARSE = TILE_SIZE / 2;
+const ED_MIN_TRIGGER_HEIGHT = 10;
+
+// The eight directions, laid out the way they sit on a 3x3 pad
+const ED_DIRECTION_PAD = [
+  ['upLeft',   'up',   'upRight'],
+  ['left',      null,  'right'],
+  ['downLeft', 'down', 'downRight']
+];
+
 // ===== EDITOR STATE =====
 let editorDoc = null;              // Working copy: { id, name, visualStyle, grid, spikeMeta, ... }
 let editorTool = 'block';
 let editorSpikeDistance = 2;       // Tiles a newly placed spike will travel
+let editorSpikeDirection = DEFAULT_SPIKE_DIRECTION; // Way a new spike will shoot
+let editorSpikeSpeed = DEFAULT_SPIKE_SPEED;         // Speed a new spike will use
 let editorSelectedSpike = null;    // { row, col } of the spike being tuned
 let editorDrag = null;             // Active mouse drag description
 let editorUndoStack = [];
@@ -100,6 +120,65 @@ function forEachSpikeInOrder(grid, callback) {
   }
 }
 
+// The editor keeps every trigger as a plain rectangle in pixels, relative to
+// the spike's own tile. A classic trigger line is simply a rectangle with a
+// width of 0, so one set of handles can shape every trap.
+function triggerAreaFromLevel(level, index, row, col) {
+  const stored = level.spikeTriggerAreas ? level.spikeTriggerAreas[index] : null;
+  if (stored && typeof stored === 'object') {
+    return {
+      x: Number(stored.x) || 0,
+      y: Number(stored.y) || 0,
+      w: Math.max(0, Number(stored.w) || 0),
+      h: Math.max(0, Number(stored.h) || 0)
+    };
+  }
+
+  // No rectangle stored: rebuild the line from the classic two arrays
+  const rawTrigger = level.spikeTriggers && level.spikeTriggers[index] !== undefined
+    ? Number(level.spikeTriggers[index])
+    : ED_DEFAULT_TRIGGER;
+  const trigger = isFinite(rawTrigger) ? rawTrigger : ED_DEFAULT_TRIGGER;
+
+  const rawLength = level.spikeTriggerLengths ? level.spikeTriggerLengths[index] : undefined;
+  const length = (rawLength === undefined || rawLength === null || rawLength === 0 || !isFinite(rawLength))
+    ? null
+    : Number(rawLength);
+
+  const tileY = row * TILE_SIZE;
+  const spikeTop = tileY + 20;
+  const x = -trigger * TILE_SIZE;
+
+  if (length === null) return { x: x, y: -tileY, w: 0, h: canvas.height };      // full height
+  if (length > 0) return { x: x, y: spikeTop - length - tileY, w: 0, h: length }; // upward
+  return { x: x, y: spikeTop - tileY, w: 0, h: Math.abs(length) };               // downward
+}
+
+// ...and turns it back into the classic fields whenever it still fits them, so
+// levels that were never reshaped keep saving in the original compact format.
+function triggerAreaToLevelFields(area, row) {
+  const tileY = row * TILE_SIZE;
+  const spikeTop = tileY + 20;
+  const top = tileY + area.y;
+  const bottom = top + area.h;
+  const trigger = -area.x / TILE_SIZE;
+  const close = (a, b) => Math.abs(a - b) < 0.001;
+
+  if (area.w === 0) {
+    if (close(top, 0) && close(bottom, canvas.height)) {
+      return { trigger: trigger, length: null, area: null };          // full height
+    }
+    if (area.h > 0 && close(bottom, spikeTop)) {
+      return { trigger: trigger, length: area.h, area: null };        // upward from the spike
+    }
+    if (area.h > 0 && close(top, spikeTop)) {
+      return { trigger: trigger, length: -area.h, area: null };       // downward from the spike
+    }
+  }
+  // Anything else needs the explicit rectangle
+  return { trigger: trigger, length: null, area: { x: area.x, y: area.y, w: area.w, h: area.h } };
+}
+
 // Stored level -> editable document
 function levelToEditorDoc(level) {
   const grid = sanitizeLevelMap(level.map).map(row => row.split(''));
@@ -109,18 +188,10 @@ function levelToEditorDoc(level) {
     // '^' is the legacy 2-tile spike; normalise it to a digit
     if (char === '^') grid[row][col] = '2';
 
-    const trigger = level.spikeTriggers && level.spikeTriggers[index] !== undefined
-      ? Number(level.spikeTriggers[index])
-      : ED_DEFAULT_TRIGGER;
-
-    const rawLength = level.spikeTriggerLengths ? level.spikeTriggerLengths[index] : undefined;
-    const length = (rawLength === undefined || rawLength === null || rawLength === 0)
-      ? null
-      : Number(rawLength);
-
     spikeMeta[spikeKey(row, col)] = {
-      trigger: isFinite(trigger) ? trigger : ED_DEFAULT_TRIGGER,
-      length: (length !== null && isFinite(length)) ? length : null
+      area: triggerAreaFromLevel(level, index, row, col),
+      dir: normalizeSpikeDirection(level.spikeDirections ? level.spikeDirections[index] : undefined),
+      speed: normalizeSpikeSpeed(level.spikeSpeeds ? level.spikeSpeeds[index] : undefined)
     };
   });
 
@@ -139,11 +210,18 @@ function levelToEditorDoc(level) {
 function editorDocToLevel(doc) {
   const triggers = [];
   const lengths = [];
+  const areas = [];
+  const directions = [];
+  const speeds = [];
 
   forEachSpikeInOrder(doc.grid, (row, col) => {
-    const meta = doc.spikeMeta[spikeKey(row, col)] || { trigger: ED_DEFAULT_TRIGGER, length: null };
-    triggers.push(meta.trigger);
-    lengths.push(meta.length);
+    const meta = doc.spikeMeta[spikeKey(row, col)] || makeSpikeMeta(row);
+    const fields = triggerAreaToLevelFields(meta.area, row);
+    triggers.push(fields.trigger);
+    lengths.push(fields.length);
+    areas.push(fields.area);
+    directions.push(normalizeSpikeDirection(meta.dir));
+    speeds.push(normalizeSpikeSpeed(meta.speed));
   });
 
   return {
@@ -153,19 +231,38 @@ function editorDocToLevel(doc) {
     map: doc.grid.map(row => row.join('')),
     spikeTriggers: triggers,
     spikeTriggerLengths: lengths,
+    spikeTriggerAreas: areas,
+    spikeDirections: directions,
+    spikeSpeeds: speeds,
     created: doc.created,
     modified: Date.now(),
     stats: doc.stats
   };
 }
 
+// A brand new spike: the classic full-height line just left of the spike,
+// shooting the way the palette is currently set.
+function makeSpikeMeta(row) {
+  return {
+    area: { x: -ED_DEFAULT_TRIGGER * TILE_SIZE, y: -row * TILE_SIZE, w: 0, h: canvas.height },
+    dir: normalizeSpikeDirection(editorSpikeDirection),
+    speed: normalizeSpikeSpeed(editorSpikeSpeed)
+  };
+}
+
 function getSpikeMeta(row, col) {
   if (!editorDoc) return null;
   const key = spikeKey(row, col);
-  if (!editorDoc.spikeMeta[key]) {
-    editorDoc.spikeMeta[key] = { trigger: ED_DEFAULT_TRIGGER, length: null };
+  const meta = editorDoc.spikeMeta[key];
+  if (!meta) {
+    editorDoc.spikeMeta[key] = makeSpikeMeta(row);
+    return editorDoc.spikeMeta[key];
   }
-  return editorDoc.spikeMeta[key];
+  // Levels saved before directions and speeds existed
+  if (!meta.area) meta.area = makeSpikeMeta(row).area;
+  if (!meta.dir) meta.dir = DEFAULT_SPIKE_DIRECTION;
+  if (!meta.speed) meta.speed = DEFAULT_SPIKE_SPEED;
+  return meta;
 }
 
 // ===== UNDO / REDO =====
@@ -395,33 +492,36 @@ function computeGravityZoneBoxes(grid) {
 // Where a spike's handles live, in world coordinates.
 function getSpikeGeometry(row, col) {
   const digit = parseInt(editorDoc.grid[row][col], 10) || 0;
-  const meta = editorDoc.spikeMeta[spikeKey(row, col)] || { trigger: ED_DEFAULT_TRIGGER, length: null };
+  const meta = getSpikeMeta(row, col);
 
   const x = col * TILE_SIZE;
   const y = row * TILE_SIZE;
   const spikeTop = y + 20;
   const moveDistance = digit * TILE_SIZE;
-  const triggerX = x - meta.trigger * TILE_SIZE;
-  const isFull = meta.length === null;
+  const vector = getSpikeDirectionVector(meta.dir);
 
-  let triggerY, triggerHeight;
-  if (isFull) {
-    triggerY = 0;
-    triggerHeight = canvas.height;
-  } else if (meta.length > 0) {
-    triggerY = spikeTop - meta.length;
-    triggerHeight = meta.length;
-  } else {
-    triggerY = spikeTop;
-    triggerHeight = Math.abs(meta.length);
-  }
+  const triggerX = x + meta.area.x;
+  const triggerY = y + meta.area.y;
+  const triggerW = meta.area.w;
+  const triggerH = meta.area.h;
 
   return {
-    digit, meta, x, y, spikeTop, moveDistance, triggerX, triggerY, triggerHeight, isFull,
-    // The end of the trigger line the player drags to change its length
-    handleY: isFull ? 14 : spikeTop - meta.length,
-    ghostX: x + moveDistance
+    digit, meta, x, y, spikeTop, moveDistance, vector,
+    triggerX, triggerY, triggerW, triggerH,
+    // A zero-width trigger that spans the whole map is the classic default
+    isFull: triggerW === 0 && triggerY <= 0.001 && triggerY + triggerH >= canvas.height - 0.001,
+    isLine: triggerW === 0,
+    // Where the spike ends up once it fires
+    ghostX: x + vector.dx * moveDistance,
+    ghostY: spikeTop + vector.dy * moveDistance
   };
+}
+
+// Human-readable summary of a trigger rectangle, used in the status bar
+function describeTrigger(g) {
+  if (g.isFull) return 'full height line';
+  if (g.isLine) return 'line ' + Math.round(g.triggerH) + 'px tall';
+  return 'box ' + Math.round(g.triggerW) + ' x ' + Math.round(g.triggerH) + 'px';
 }
 
 // ===== LAYOUT (buttons are rebuilt every frame and reused for hit-testing) =====
@@ -443,16 +543,29 @@ function buildEditorLayout() {
 
   // --- tool palette ---
   EDITOR_TOOLS.forEach((tool, i) => {
-    push('tool:' + tool.id, 8, 86 + i * 45, 174, 40, { tool: tool.id });
+    push('tool:' + tool.id, 8, ED_TOOLS_Y + i * ED_TOOL_STEP, 174, ED_TOOL_H, { tool: tool.id });
   });
 
-  // --- spike power chips (only while the spike tool or a spike is in play) ---
-  if (editorTool === 'spike' || editorSelectedSpike) {
+  // --- spike controls (only while the spike tool or a spike is in play) ---
+  if (editorSpikeControlsVisible()) {
+    // Range: how many tiles it travels
     for (let d = 0; d <= 9; d++) {
       const cx = 12 + (d % 5) * 35;
-      const cy = 558 + Math.floor(d / 5) * 32;
-      push('spikeDist:' + d, cx, cy, 32, 28, { distance: d });
+      const cy = ED_SPIKE_Y + 18 + Math.floor(d / 5) * 30;
+      push('spikeDist:' + d, cx, cy, 32, 26, { distance: d });
     }
+
+    // Direction: a 3x3 pad of arrows
+    ED_DIRECTION_PAD.forEach((padRow, r) => {
+      padRow.forEach((dir, c) => {
+        if (!dir) return;
+        push('spikeDir:' + dir, 12 + c * 27, ED_SPIKE_DIR_Y + r * 27, 25, 25, { direction: dir });
+      });
+    });
+
+    // Speed: a stepper along a short ladder of useful speeds
+    push('spikeSpeed:down', 102, ED_SPIKE_DIR_Y, 24, 25, { step: -1 });
+    push('spikeSpeed:up', 160, ED_SPIKE_DIR_Y, 24, 25, { step: 1 });
   }
 
   // --- bottom bar ---
@@ -463,6 +576,49 @@ function buildEditorLayout() {
 
   editorButtons = b;
   return b;
+}
+
+// The spike section of the palette is only worth the room when a spike is
+// selected or about to be placed.
+function editorSpikeControlsVisible() {
+  return editorTool === 'spike' || !!editorSelectedSpike;
+}
+
+// A short ladder of speeds, so the stepper reaches the extremes in a few clicks
+const ED_SPEED_LADDER = [0.5, 1, 1.5, 2, 3, 4, 5, 6, 8, 10, 14, 20];
+
+function edSpeedStep(speed, step) {
+  let index = 0;
+  let bestGap = Infinity;
+  ED_SPEED_LADDER.forEach((value, i) => {
+    const gap = Math.abs(value - speed);
+    if (gap < bestGap) {
+      bestGap = gap;
+      index = i;
+    }
+  });
+  const next = Math.max(0, Math.min(ED_SPEED_LADDER.length - 1, index + step));
+  return ED_SPEED_LADDER[next];
+}
+
+// What the palette is currently showing: the selected spike, or the settings a
+// newly placed spike will get.
+function editorActiveSpikeSettings() {
+  if (editorSelectedSpike && isSpikeChar(editorDoc.grid[editorSelectedSpike.row][editorSelectedSpike.col])) {
+    const meta = getSpikeMeta(editorSelectedSpike.row, editorSelectedSpike.col);
+    return {
+      selected: true,
+      distance: parseInt(editorDoc.grid[editorSelectedSpike.row][editorSelectedSpike.col], 10) || 0,
+      dir: meta.dir,
+      speed: meta.speed
+    };
+  }
+  return {
+    selected: false,
+    distance: editorSpikeDistance,
+    dir: editorSpikeDirection,
+    speed: editorSpikeSpeed
+  };
 }
 
 function edButtonAt(x, y) {
@@ -845,9 +1001,10 @@ function drawEditorSpikeOverlays() {
 function drawOneSpikeOverlay(row, col, selected) {
   const g = getSpikeGeometry(row, col);
 
-  const lineX = edWorldToScreenX(g.triggerX);
+  const left = edWorldToScreenX(g.triggerX);
+  const right = edWorldToScreenX(g.triggerX + g.triggerW);
   const topY = Math.max(ED_GRID_Y, edWorldToScreenY(g.triggerY));
-  const botY = Math.min(ED_GRID_Y + ED_GRID_H, edWorldToScreenY(g.triggerY + g.triggerHeight));
+  const botY = Math.min(ED_GRID_Y + ED_GRID_H, edWorldToScreenY(g.triggerY + g.triggerH));
   const spikeX = edWorldToScreenX(g.x);
   const spikeTopY = edWorldToScreenY(g.spikeTop);
   const tileW = TILE_SIZE * ED_SCALE;
@@ -857,101 +1014,102 @@ function drawOneSpikeOverlay(row, col, selected) {
   const hasTrigger = g.digit > 0;
 
   if (hasTrigger) {
-    // Trigger line
     ctx.strokeStyle = selected ? '#ffdd33' : 'rgba(255, 221, 51, 0.28)';
     ctx.lineWidth = selected ? 3 : 2;
     ctx.setLineDash(selected ? [] : [6, 5]);
-    ctx.beginPath();
-    ctx.moveTo(lineX, topY);
-    ctx.lineTo(lineX, botY);
-    ctx.stroke();
+
+    if (g.isLine) {
+      ctx.beginPath();
+      ctx.moveTo(left, topY);
+      ctx.lineTo(left, botY);
+      ctx.stroke();
+    } else {
+      if (selected) {
+        ctx.fillStyle = 'rgba(255, 221, 51, 0.10)';
+        ctx.fillRect(left, topY, right - left, botY - topY);
+      }
+      ctx.strokeRect(left, topY, right - left, botY - topY);
+    }
     ctx.setLineDash([]);
 
-    if (selected) {
+    if (selected && g.isLine) {
       // Soft band showing the slice of space that arms the trap
       ctx.fillStyle = 'rgba(255, 221, 51, 0.10)';
-      ctx.fillRect(lineX - 5, topY, 10, botY - topY);
-
-      // Grab bars at both ends of the line
-      ctx.fillStyle = '#ffdd33';
-      ctx.fillRect(lineX - 7, topY - 2, 14, 4);
-      ctx.fillRect(lineX - 7, botY - 2, 14, 4);
+      ctx.fillRect(left - 5, topY, 10, botY - topY);
     }
   }
 
   if (!selected) return;
 
   // --- ghost: where the spike shoots to ---
-  const ghostX = edWorldToScreenX(g.ghostX);
   if (g.digit > 0) {
+    const ghostX = edWorldToScreenX(g.ghostX);
+    const ghostY = edWorldToScreenY(g.ghostY);
+
     ctx.save();
     ctx.globalAlpha = 0.45;
     ctx.fillStyle = '#ff4455';
-    ctx.fillRect(ghostX, spikeTopY, tileW, spikeH);
+    ctx.fillRect(ghostX, ghostY, tileW, spikeH);
     ctx.restore();
 
     ctx.strokeStyle = '#ff8899';
     ctx.lineWidth = 2;
     ctx.setLineDash([6, 4]);
-    ctx.strokeRect(ghostX, spikeTopY, tileW, spikeH);
+    ctx.strokeRect(ghostX, ghostY, tileW, spikeH);
     ctx.setLineDash([]);
 
-    // Arrow from the spike to the ghost
-    const arrowY = spikeTopY + spikeH / 2;
+    // Arrow from the spike to the ghost, whichever way it travels
+    const fromX = spikeX + tileW / 2;
+    const fromY = spikeTopY + spikeH / 2;
+    const toX = ghostX + tileW / 2;
+    const toY = ghostY + spikeH / 2;
+    const dx = toX - fromX;
+    const dy = toY - fromY;
+    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+
     ctx.strokeStyle = '#ff8899';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(spikeX + tileW / 2, arrowY);
-    ctx.lineTo(ghostX + tileW / 2 - 10, arrowY);
+    ctx.moveTo(fromX, fromY);
+    ctx.lineTo(toX - ux * 10, toY - uy * 10);
     ctx.stroke();
+
     ctx.fillStyle = '#ff8899';
     ctx.beginPath();
-    ctx.moveTo(ghostX + tileW / 2, arrowY);
-    ctx.lineTo(ghostX + tileW / 2 - 11, arrowY - 6);
-    ctx.lineTo(ghostX + tileW / 2 - 11, arrowY + 6);
+    ctx.moveTo(toX, toY);
+    ctx.lineTo(toX - ux * 12 - uy * 6, toY - uy * 12 + ux * 6);
+    ctx.lineTo(toX - ux * 12 + uy * 6, toY - uy * 12 - ux * 6);
     ctx.closePath();
     ctx.fill();
 
     // Drag grip on the ghost
     ctx.fillStyle = '#ffffff';
     for (let i = -1; i <= 1; i++) {
-      ctx.fillRect(ghostX + tileW / 2 - 1 + i * 5, spikeTopY + spikeH / 2 - 6, 2, 12);
+      ctx.fillRect(toX - 1 + i * 5, toY - 6, 2, 12);
     }
   }
 
-  // --- length handle at the free end of the trigger line ---
+  // --- the two corner handles: where the trigger starts and where it ends ---
   if (hasTrigger) {
-    const handleY = Math.max(ED_GRID_Y + 6, Math.min(ED_GRID_Y + ED_GRID_H - 6, edWorldToScreenY(g.handleY)));
-    ctx.fillStyle = g.isFull ? '#66ddff' : '#ffdd33';
-    ctx.strokeStyle = '#1a1a22';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(lineX, handleY, 9, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
+    const startY = Math.max(ED_GRID_Y + 6, Math.min(ED_GRID_Y + ED_GRID_H - 6, edWorldToScreenY(g.triggerY)));
+    const endY = Math.max(ED_GRID_Y + 6, Math.min(ED_GRID_Y + ED_GRID_H - 6, edWorldToScreenY(g.triggerY + g.triggerH)));
 
-    // Up/down chevrons inside the handle
-    ctx.strokeStyle = '#1a1a22';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(lineX - 4, handleY - 1);
-    ctx.lineTo(lineX, handleY - 5);
-    ctx.lineTo(lineX + 4, handleY - 1);
-    ctx.moveTo(lineX - 4, handleY + 1);
-    ctx.lineTo(lineX, handleY + 5);
-    ctx.lineTo(lineX + 4, handleY + 1);
-    ctx.stroke();
+    edDrawTriggerHandle(left, startY, g.isFull ? '#66ddff' : '#ffdd33', -1);
+    edDrawTriggerHandle(right, endY, g.isFull ? '#66ddff' : '#ffdd33', 1);
 
-    // Label above the line
-    const label = g.isFull ? 'FULL HEIGHT' : (g.meta.length > 0 ? 'UP ' + Math.round(g.meta.length) + 'px' : 'DOWN ' + Math.round(Math.abs(g.meta.length)) + 'px');
-    const labelY = Math.max(ED_GRID_Y + 14, Math.min(handleY - 16, ED_GRID_Y + ED_GRID_H - 8));
+    // Label above the trigger
+    const label = describeTrigger(g).toUpperCase();
+    const labelX = (left + right) / 2;
+    const labelY = Math.max(ED_GRID_Y + 14, Math.min(startY - 16, ED_GRID_Y + ED_GRID_H - 8));
     ctx.font = 'bold 12px Arial, sans-serif';
     ctx.textAlign = 'center';
     const w = ctx.measureText(label).width + 12;
     ctx.fillStyle = 'rgba(20,20,28,0.85)';
-    ctx.fillRect(lineX - w / 2, labelY - 12, w, 16);
+    ctx.fillRect(labelX - w / 2, labelY - 12, w, 16);
     ctx.fillStyle = g.isFull ? '#66ddff' : '#ffdd33';
-    ctx.fillText(label, lineX, labelY);
+    ctx.fillText(label, labelX, labelY);
     ctx.textAlign = 'left';
   }
 
@@ -962,14 +1120,44 @@ function drawOneSpikeOverlay(row, col, selected) {
   ctx.strokeRect(spikeX + 1, edWorldToScreenY(g.y) + 1, tileW - 2, TILE_SIZE * ED_SCALE - 2);
   ctx.setLineDash([]);
 
-  // Power badge on the spike
-  ctx.fillStyle = 'rgba(20,20,28,0.85)';
-  ctx.fillRect(spikeX + 2, edWorldToScreenY(g.y) + 2, 20, 16);
-  ctx.fillStyle = '#ffffff';
+  // Range + direction badge on the spike
+  const badge = String(g.digit) + g.vector.arrow;
   ctx.font = 'bold 12px Arial, sans-serif';
+  const badgeW = ctx.measureText(badge).width + 8;
+  ctx.fillStyle = 'rgba(20,20,28,0.85)';
+  ctx.fillRect(spikeX + 2, edWorldToScreenY(g.y) + 2, badgeW, 16);
+  ctx.fillStyle = '#ffffff';
   ctx.textAlign = 'center';
-  ctx.fillText(String(g.digit), spikeX + 12, edWorldToScreenY(g.y) + 14);
+  ctx.fillText(badge, spikeX + 2 + badgeW / 2, edWorldToScreenY(g.y) + 14);
   ctx.textAlign = 'left';
+}
+
+// One round grab handle with a chevron pointing the way it resizes
+function edDrawTriggerHandle(x, y, color, side) {
+  ctx.fillStyle = color;
+  ctx.strokeStyle = '#1a1a22';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(x, y, 9, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.strokeStyle = '#1a1a22';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x - 4, y - 1);
+  ctx.lineTo(x, y - 5);
+  ctx.lineTo(x + 4, y - 1);
+  ctx.moveTo(x - 4, y + 1);
+  ctx.lineTo(x, y + 5);
+  ctx.lineTo(x + 4, y + 1);
+  ctx.stroke();
+
+  // A tick on the outer side, so start and end handles are told apart
+  ctx.beginPath();
+  ctx.moveTo(x + side * 9, y);
+  ctx.lineTo(x + side * 14, y);
+  ctx.stroke();
 }
 
 // Hover highlight + shift-rectangle preview
@@ -1090,51 +1278,108 @@ function drawEditorPalette() {
     const active = editorTool === tool.id;
     edDrawButton(btn, null, { active, activeColor: '#33334a', borderColor: tool.color });
 
-    edDrawTileIcon(btn.x + 7, btn.y + 6, 28, tool);
+    edDrawTileIcon(btn.x + 6, btn.y + 5, 26, tool);
 
     ctx.fillStyle = active ? '#ffffff' : '#c3c3d0';
     ctx.font = 'bold 14px Arial, sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(tool.label, btn.x + 44, btn.y + 25);
+    ctx.fillText(tool.label, btn.x + 40, btn.y + 23);
 
     ctx.fillStyle = active ? '#9aa4b8' : '#5f5f70';
     ctx.font = 'bold 12px monospace';
     ctx.textAlign = 'right';
-    ctx.fillText(tool.key, btn.x + btn.w - 8, btn.y + 25);
+    ctx.fillText(tool.key, btn.x + btn.w - 8, btn.y + 23);
     ctx.textAlign = 'left';
   });
 
-  // Spike power chips (0-9 tiles of travel)
-  if (editorTool === 'spike' || editorSelectedSpike) {
+  // Spike controls: range, direction and speed
+  if (editorSpikeControlsVisible()) {
+    const active = editorActiveSpikeSettings();
+
     ctx.fillStyle = '#7f7f92';
     ctx.font = 'bold 13px Arial, sans-serif';
-    ctx.fillText(editorSelectedSpike ? 'SPIKE RANGE (tiles)' : 'NEW SPIKE RANGE', 12, 550);
-
-    const currentDistance = editorSelectedSpike
-      ? (parseInt(editorDoc.grid[editorSelectedSpike.row][editorSelectedSpike.col], 10) || 0)
-      : editorSpikeDistance;
+    ctx.textAlign = 'left';
+    ctx.fillText(active.selected ? 'SPIKE RANGE (tiles)' : 'NEW SPIKE RANGE', 12, ED_SPIKE_Y + 10);
 
     for (let d = 0; d <= 9; d++) {
       const btn = editorButtons.find(b => b.id === 'spikeDist:' + d);
       if (!btn) continue;
       edDrawButton(btn, String(d), {
-        active: currentDistance === d,
+        active: active.distance === d,
         activeColor: '#8a2733',
         borderColor: '#ff6677',
         font: 'bold 14px Arial, sans-serif'
       });
     }
 
+    ctx.fillStyle = '#7f7f92';
+    ctx.font = 'bold 13px Arial, sans-serif';
+    ctx.fillText('DIRECTION', 12, ED_SPIKE_DIR_Y - 8);
+    ctx.fillText('SPEED', 102, ED_SPIKE_DIR_Y - 8);
+
+    // Direction pad - the centre cell shows the range instead of a 9th arrow
+    ED_DIRECTION_PAD.forEach((padRow, r) => {
+      padRow.forEach((dir, c) => {
+        if (!dir) {
+          const cx = 12 + c * 27;
+          const cy = ED_SPIKE_DIR_Y + r * 27;
+          ctx.fillStyle = '#23232c';
+          ctx.fillRect(cx, cy, 25, 25);
+          ctx.fillStyle = '#6f6f80';
+          ctx.font = 'bold 13px Arial, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(String(active.distance), cx + 12, cy + 17);
+          ctx.textAlign = 'left';
+          return;
+        }
+        const btn = editorButtons.find(b => b.id === 'spikeDir:' + dir);
+        if (!btn) return;
+        edDrawButton(btn, SPIKE_DIRECTIONS[dir].arrow, {
+          active: active.dir === dir,
+          activeColor: '#8a2733',
+          borderColor: '#ff6677',
+          font: 'bold 15px Arial, sans-serif'
+        });
+      });
+    });
+
+    // Speed stepper
+    const downBtn = editorButtons.find(b => b.id === 'spikeSpeed:down');
+    const upBtn = editorButtons.find(b => b.id === 'spikeSpeed:up');
+    edDrawButton(downBtn, '\u2212', { font: 'bold 16px Arial, sans-serif', disabled: active.speed <= ED_SPEED_LADDER[0] });
+    edDrawButton(upBtn, '+', { font: 'bold 16px Arial, sans-serif', disabled: active.speed >= ED_SPEED_LADDER[ED_SPEED_LADDER.length - 1] });
+
+    ctx.fillStyle = '#23232c';
+    ctx.fillRect(128, ED_SPIKE_DIR_Y, 30, 25);
+    ctx.strokeStyle = '#4a4a58';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(128.5, ED_SPIKE_DIR_Y + 0.5, 29, 24);
+    ctx.fillStyle = '#ffdd33';
+    ctx.font = 'bold 13px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(String(active.speed), 143, ED_SPIKE_DIR_Y + 17);
+    ctx.textAlign = 'left';
+
+    // How long that dash actually lasts, in plain seconds
+    ctx.fillStyle = '#8a8a9c';
+    ctx.font = '11px Arial, sans-serif';
+    ctx.fillText((1 / active.speed).toFixed(2) + 's dash', 102, ED_SPIKE_DIR_Y + 40);
+    ctx.fillText(active.speed > DEFAULT_SPIKE_SPEED ? 'faster' : (active.speed < DEFAULT_SPIKE_SPEED ? 'slower' : 'classic'),
+      102, ED_SPIKE_DIR_Y + 54);
+
     ctx.fillStyle = '#6f6f80';
     ctx.font = '11px Arial, sans-serif';
-    ctx.fillText('0 = never moves', 12, 636);
+    ctx.fillText('0 = never moves', 12, ED_SPIKE_DIR_Y + 94);
   }
 
   // Contextual tip for the active tool
   ctx.fillStyle = '#8a8a9c';
   ctx.font = '12px Arial, sans-serif';
-  const tipY = (editorTool === 'spike' || editorSelectedSpike) ? 652 : 556;
-  edWrapText(EDITOR_TOOL_HINTS[editorTool] || '', 12, tipY, ED_PALETTE_W - 24, 15, 5);
+  // With the spike controls open there is only room for a two-line tip - the
+  // bar along the bottom carries the full explanation anyway.
+  const tight = editorSpikeControlsVisible();
+  edWrapText(EDITOR_TOOL_HINTS[editorTool] || '', 12, tight ? ED_SPIKE_DIR_Y + 112 : ED_SPIKE_Y,
+    ED_PALETTE_W - 24, 15, tight ? 2 : 6);
 }
 
 // --- bottom status bar ---
@@ -1161,14 +1406,15 @@ function drawEditorBottomBar() {
   // A selected spike shows its exact numbers here
   if (editorSelectedSpike && isSpikeChar(editorDoc.grid[editorSelectedSpike.row][editorSelectedSpike.col])) {
     const g = getSpikeGeometry(editorSelectedSpike.row, editorSelectedSpike.col);
-    const lengthText = g.isFull ? 'full height' : (g.meta.length > 0 ? Math.round(g.meta.length) + 'px up' : Math.round(Math.abs(g.meta.length)) + 'px down');
     ctx.fillStyle = '#ffdd33';
     ctx.font = 'bold 14px Arial, sans-serif';
-    ctx.fillText('SPIKE  •  range ' + g.digit + ' tiles  •  trigger ' + g.meta.trigger.toFixed(2).replace(/\.?0+$/, '') + ' tiles  •  trigger length ' + lengthText,
+    ctx.fillText('SPIKE  •  ' + g.digit + ' tiles ' + g.vector.arrow + ' ' + g.meta.dir +
+      '  •  speed ' + g.meta.speed + ' (' + (1 / g.meta.speed).toFixed(2) + 's dash)' +
+      '  •  trigger ' + describeTrigger(g) + ' at ' + Math.round(g.triggerX) + ',' + Math.round(g.triggerY),
       ED_PALETTE_W + 14, ED_BOTTOM_Y + 20);
     ctx.fillStyle = '#8a8a9c';
     ctx.font = '12px Arial, sans-serif';
-    ctx.fillText('Drag the ghost = range  |  drag the yellow line = where it fires  |  drag the round handle = how tall the trigger is  |  H = full height  |  DEL = remove',
+    ctx.fillText('Drag the ghost = range + direction  |  drag the trigger = move it anywhere  |  drag a round handle = where it starts / ends  |  drag the spike = move the whole trap  |  R rotate  |  H full height  |  DEL remove',
       ED_PALETTE_W + 14, ED_BOTTOM_Y + 37);
     return;
   }
@@ -1219,18 +1465,22 @@ function drawEditorHelpOverlay() {
     ]],
     ['SPIKE TRAPS (drag, never type)', [
       'Click a spike with SELECT to tune it',
-      'Drag the red ghost ...... how far the spike shoots (0-9 tiles)',
-      'Drag the yellow line .... where the player sets it off',
-      'Drag the round handle ... how tall that trigger is',
-      'Handle to the very top .. trigger covers the full screen',
-      'H ....................... snap back to full height',
-      'Arrow keys .............. nudge trigger / length precisely',
+      'Drag the red ghost ...... how far AND which way it shoots (8 ways)',
+      'Drag the yellow trigger . move it anywhere on the map',
+      'Drag a round handle ..... where the trigger starts / where it ends',
+      'Drag the spike itself ... move the whole trap to another tile',
+      'Direction pad ........... aim without dragging',
+      'Speed - / + ............. how fast the spike dashes',
+      'H ....................... full height trigger on / off',
+      'R / SHIFT+R ............. rotate the direction',
+      'Arrow keys .............. move the trigger (ALT = resize it)',
       'DELETE .................. remove the selected spike'
     ]],
     ['TOOLS', [
       'V select   B solid   F fake   I hidden   C crumble',
       'K spike    G gravity  S spawn  D door    X eraser',
-      '0-9 ..................... spike range (also retunes a selected spike)'
+      '0-9 ..................... spike range (also retunes a selected spike)',
+      'R rotate   - / + speed   H full-height trigger'
     ]],
     ['LEVEL', [
       'CTRL+Z / CTRL+Y ......... undo / redo',
@@ -1245,14 +1495,14 @@ function drawEditorHelpOverlay() {
     ctx.fillStyle = '#ffcc44';
     ctx.font = 'bold 17px Arial, sans-serif';
     ctx.fillText(title, boxX + 40, y);
-    y += 22;
+    y += 20;
     ctx.fillStyle = '#c8c8d6';
-    ctx.font = '15px monospace';
+    ctx.font = '14px monospace';
     lines.forEach(line => {
       ctx.fillText(line, boxX + 52, y);
-      y += 20;
+      y += 18;
     });
-    y += 10;
+    y += 8;
   });
 
   ctx.fillStyle = '#8a8a9c';
@@ -1365,6 +1615,28 @@ function setSelectedSpikeDistance(distance) {
   getSpikeMeta(row, col);
 }
 
+function setSelectedSpikeDirection(direction) {
+  if (!editorSelectedSpike) return;
+  const meta = getSpikeMeta(editorSelectedSpike.row, editorSelectedSpike.col);
+  const clean = normalizeSpikeDirection(direction);
+  if (meta.dir === clean) return;
+
+  pushEditorUndo();
+  meta.dir = clean;
+  setEditorStatus('Spike shoots ' + SPIKE_DIRECTIONS[clean].arrow + ' ' + clean, '#ffdd33');
+}
+
+function setSelectedSpikeSpeed(speed) {
+  if (!editorSelectedSpike) return;
+  const meta = getSpikeMeta(editorSelectedSpike.row, editorSelectedSpike.col);
+  const clean = normalizeSpikeSpeed(speed);
+  if (meta.speed === clean) return;
+
+  pushEditorUndo();
+  meta.speed = clean;
+  setEditorStatus('Spike speed ' + clean + '  (' + (1 / clean).toFixed(2) + 's dash)', '#ffdd33');
+}
+
 function deleteSelectedSpike() {
   if (!editorSelectedSpike) return;
   const { row, col } = editorSelectedSpike;
@@ -1388,8 +1660,8 @@ function clearEditorLevel() {
 // ===== HANDLE HIT-TESTING =====
 
 function editorHitSpikeHandle(x, y) {
-  // Only the SELECT tool grabs handles - otherwise a trigger line lying across
-  // the map would swallow clicks meant for painting.
+  // Only the SELECT tool grabs handles - otherwise a trigger lying across the
+  // map would swallow clicks meant for painting.
   if (editorTool !== 'select') return null;
   if (!editorSelectedSpike) return null;
   const { row, col } = editorSelectedSpike;
@@ -1399,28 +1671,51 @@ function editorHitSpikeHandle(x, y) {
   if (g.digit === 0) return null; // A static spike has nothing to tune
 
   const worldX = edScreenToWorldX(x);
-  const lineX = edWorldToScreenX(g.triggerX);
+  const worldY = edScreenToWorldY(y);
+  const left = edWorldToScreenX(g.triggerX);
+  const right = edWorldToScreenX(g.triggerX + g.triggerW);
   const tileW = TILE_SIZE * ED_SCALE;
   const spikeH = (TILE_SIZE - 20) * ED_SCALE;
 
-  // 1) round handle at the end of the trigger line
-  const handleY = Math.max(ED_GRID_Y + 6, Math.min(ED_GRID_Y + ED_GRID_H - 6, edWorldToScreenY(g.handleY)));
-  if ((x - lineX) * (x - lineX) + (y - handleY) * (y - handleY) <= 169) {
-    return { type: 'length', row, col };
-  }
+  // 1) the two round handles: where the trigger starts and where it ends
+  const startY = Math.max(ED_GRID_Y + 6, Math.min(ED_GRID_Y + ED_GRID_H - 6, edWorldToScreenY(g.triggerY)));
+  const endY = Math.max(ED_GRID_Y + 6, Math.min(ED_GRID_Y + ED_GRID_H - 6, edWorldToScreenY(g.triggerY + g.triggerH)));
+  const near = (hx, hy) => (x - hx) * (x - hx) + (y - hy) * (y - hy) <= 169;
 
-  // 2) ghost block = travel distance
+  if (near(right, endY)) return { type: 'triggerEnd', row, col };
+  if (near(left, startY)) return { type: 'triggerStart', row, col };
+
+  // 2) ghost block = direction and distance
   const ghostX = edWorldToScreenX(g.ghostX);
-  const spikeTopY = edWorldToScreenY(g.spikeTop);
-  if (x >= ghostX && x <= ghostX + tileW && y >= spikeTopY && y <= spikeTopY + spikeH) {
-    return { type: 'ghost', row, col, grab: worldX - g.ghostX };
+  const ghostY = edWorldToScreenY(g.ghostY);
+  if (x >= ghostX && x <= ghostX + tileW && y >= ghostY && y <= ghostY + spikeH) {
+    // Remember where inside the ghost it was grabbed, so it does not jump
+    return {
+      type: 'ghost', row, col,
+      grabX: worldX - (g.ghostX + TILE_SIZE / 2),
+      grabY: worldY - (g.ghostY + (TILE_SIZE - 20) / 2)
+    };
   }
 
-  // 3) the trigger line itself
+  // 3) the spike itself: drag it to another tile, trap and all
+  const spikeX = edWorldToScreenX(g.x);
+  const spikeTopY = edWorldToScreenY(g.spikeTop);
+  if (x >= spikeX && x <= spikeX + tileW && y >= spikeTopY && y <= spikeTopY + spikeH) {
+    return { type: 'spikeMove', row, col };
+  }
+
+  // 4) the trigger body: drag it anywhere on the map
   const topY = Math.max(ED_GRID_Y, edWorldToScreenY(g.triggerY));
-  const botY = Math.min(ED_GRID_Y + ED_GRID_H, edWorldToScreenY(g.triggerY + g.triggerHeight));
-  if (Math.abs(x - lineX) <= 7 && y >= topY - 5 && y <= botY + 5) {
-    return { type: 'trigger', row, col, grab: worldX - g.triggerX };
+  const botY = Math.min(ED_GRID_Y + ED_GRID_H, edWorldToScreenY(g.triggerY + g.triggerH));
+  const insideY = y >= topY - 5 && y <= botY + 5;
+  const insideX = g.isLine ? Math.abs(x - left) <= 7 : (x >= left - 4 && x <= right + 4);
+
+  if (insideX && insideY) {
+    return {
+      type: 'triggerMove', row, col,
+      grabX: worldX - g.triggerX,
+      grabY: worldY - g.triggerY
+    };
   }
 
   return null;
@@ -1428,51 +1723,123 @@ function editorHitSpikeHandle(x, y) {
 
 // ===== DRAG UPDATES =====
 
-function updateSpikeTriggerDrag(x) {
-  const { row, col } = editorDrag;
-  const meta = getSpikeMeta(row, col);
-  const spikeWorldX = col * TILE_SIZE;
-
-  const worldX = edScreenToWorldX(x) - editorDrag.grab;
-  let offset = (spikeWorldX - worldX) / TILE_SIZE;
-
-  offset = editorModifiers.alt ? Math.round(offset * 100) / 100 : edSnap(offset, 0.5);
-
-  // Keep the line somewhere on (or just beside) the screen
-  const minOffset = (spikeWorldX - (canvas.width + TILE_SIZE)) / TILE_SIZE;
-  const maxOffset = (spikeWorldX + TILE_SIZE) / TILE_SIZE;
-  meta.trigger = Math.max(minOffset, Math.min(maxOffset, offset));
+// Snap step for trigger dragging: fine by default, half a tile with SHIFT,
+// completely free with ALT.
+function edTriggerSnap(value) {
+  if (editorModifiers.alt) return Math.round(value);
+  if (editorModifiers.shift) return edSnap(value, ED_TRIGGER_SNAP_COARSE);
+  return edSnap(value, ED_TRIGGER_SNAP);
 }
 
-function updateSpikeLengthDrag(y) {
+// Drag the whole trigger anywhere on the map
+function updateTriggerMoveDrag(x, y) {
   const { row, col } = editorDrag;
   const meta = getSpikeMeta(row, col);
-  const spikeTop = row * TILE_SIZE + 20;
+  const tileX = col * TILE_SIZE;
+  const tileY = row * TILE_SIZE;
 
-  // Pulling the handle to the very top means "cover the whole screen"
-  if (y <= ED_GRID_Y + 12) {
-    meta.length = null;
-    return;
+  const worldX = edScreenToWorldX(x) - editorDrag.grabX;
+  const worldY = edScreenToWorldY(y) - editorDrag.grabY;
+
+  meta.area.x = edTriggerSnap(worldX - tileX);
+  meta.area.y = edTriggerSnap(worldY - tileY);
+  clampTriggerArea(meta.area, row, col);
+}
+
+// Drag either end of the trigger: "where it starts" and "where it ends"
+function updateTriggerCornerDrag(x, y, isEnd) {
+  const { row, col } = editorDrag;
+  const meta = getSpikeMeta(row, col);
+  const area = meta.area;
+  const tileX = col * TILE_SIZE;
+  const tileY = row * TILE_SIZE;
+
+  const worldX = edTriggerSnap(edScreenToWorldX(x) - tileX);
+  const worldY = edTriggerSnap(edScreenToWorldY(y) - tileY);
+
+  if (isEnd) {
+    // Bottom-right corner: pulling it back onto the start collapses the box
+    // into the classic zero-width line.
+    area.w = Math.max(0, worldX - area.x);
+    area.h = Math.max(ED_MIN_TRIGGER_HEIGHT, worldY - area.y);
+  } else {
+    // Top-left corner: keep the opposite corner pinned
+    const endX = area.x + area.w;
+    const endY = area.y + area.h;
+    area.x = Math.min(worldX, endX);
+    area.y = Math.min(worldY, endY - ED_MIN_TRIGGER_HEIGHT);
+    area.w = Math.max(0, endX - area.x);
+    area.h = Math.max(ED_MIN_TRIGGER_HEIGHT, endY - area.y);
+  }
+  clampTriggerArea(area, row, col);
+}
+
+// Keep a trigger reachable: it may hang off the map a little, never miles away
+function clampTriggerArea(area, row, col) {
+  const tileX = col * TILE_SIZE;
+  const tileY = row * TILE_SIZE;
+
+  area.w = Math.max(0, Math.min(canvas.width, area.w));
+  area.h = Math.max(ED_MIN_TRIGGER_HEIGHT, Math.min(canvas.height, area.h));
+  area.x = Math.max(-tileX - TILE_SIZE, Math.min(canvas.width - tileX, area.x));
+  area.y = Math.max(-tileY - TILE_SIZE, Math.min(canvas.height - tileY, area.y));
+}
+
+// Snap the trigger back to the full-height line the game uses by default
+function setTriggerFullHeight(row, col) {
+  const meta = getSpikeMeta(row, col);
+  meta.area.y = -row * TILE_SIZE;
+  meta.area.h = canvas.height;
+  meta.area.w = 0;
+}
+
+// Drag the ghost: the direction is whichever of the eight is closest, the
+// distance is how many tiles away it was dropped.
+function updateSpikeGhostDrag(x, y) {
+  const { row, col } = editorDrag;
+  const meta = getSpikeMeta(row, col);
+  const spikeCenterX = col * TILE_SIZE + TILE_SIZE / 2;
+  const spikeCenterY = row * TILE_SIZE + 20 + (TILE_SIZE - 20) / 2;
+
+  const dx = edScreenToWorldX(x) - (editorDrag.grabX || 0) - spikeCenterX;
+  const dy = edScreenToWorldY(y) - (editorDrag.grabY || 0) - spikeCenterY;
+
+  const distance = Math.max(0, Math.min(9, Math.round(Math.sqrt(dx * dx + dy * dy) / TILE_SIZE)));
+  if (distance > 0) {
+    meta.dir = spikeDirectionFromVector(dx, dy);
+    editorSpikeDirection = meta.dir;
   }
 
-  const worldY = edScreenToWorldY(y);
-  let length = spikeTop - worldY;
-  length = editorModifiers.alt ? Math.round(length) : edSnap(length, 20);
-
-  // 0 would mean "full height" to the game engine, so never produce it
-  if (Math.abs(length) < 20) length = length >= 0 ? 20 : -20;
-  meta.length = Math.max(-900, Math.min(900, length));
-}
-
-function updateSpikeGhostDrag(x) {
-  const { row, col } = editorDrag;
-  const spikeWorldX = col * TILE_SIZE;
-  const worldX = edScreenToWorldX(x) - editorDrag.grab;
-
-  let distance = Math.round((worldX - spikeWorldX) / TILE_SIZE);
-  distance = Math.max(0, Math.min(9, distance));
   editorDoc.grid[row][col] = String(distance);
   editorSpikeDistance = distance;
+}
+
+// Drag the spike itself onto another tile, taking its whole trap with it
+function updateSpikeMoveDrag(cell) {
+  const { row, col } = editorDrag;
+  if (cell.row === row && cell.col === col) return;
+
+  const grid = editorDoc.grid;
+  const target = grid[cell.row][cell.col];
+  // Never bulldoze another trap, the spawn or the exit
+  if (isSpikeChar(target) || target === 'S' || target === 'D') return;
+
+  const char = grid[row][col];
+  const meta = editorDoc.spikeMeta[spikeKey(row, col)];
+
+  grid[row][col] = editorDrag.under !== undefined ? editorDrag.under : '.';
+  editorDrag.under = target;
+  grid[cell.row][cell.col] = char;
+
+  delete editorDoc.spikeMeta[spikeKey(row, col)];
+  if (meta) {
+    // The trigger is stored relative to the tile, so it travels along
+    editorDoc.spikeMeta[spikeKey(cell.row, cell.col)] = meta;
+  }
+
+  editorDrag.row = cell.row;
+  editorDrag.col = cell.col;
+  editorSelectedSpike = { row: cell.row, col: cell.col };
 }
 
 function updateEntityDrag(cell) {
@@ -1510,6 +1877,21 @@ function editorHandleButton(btn) {
     editorSpikeDistance = btn.distance;
     if (editorSelectedSpike) setSelectedSpikeDistance(btn.distance);
     else editorTool = 'spike';
+    return;
+  }
+
+  if (btn.id.startsWith('spikeDir:')) {
+    editorSpikeDirection = btn.direction;
+    if (editorSelectedSpike) setSelectedSpikeDirection(btn.direction);
+    else editorTool = 'spike';
+    return;
+  }
+
+  if (btn.id.startsWith('spikeSpeed:')) {
+    const current = editorActiveSpikeSettings();
+    const next = edSpeedStep(current.speed, btn.step);
+    editorSpikeSpeed = next;
+    if (editorSelectedSpike) setSelectedSpikeSpeed(next);
     return;
   }
 
@@ -1574,7 +1956,11 @@ function editorMouseDown(x, y, button, event) {
     if (isSpikeChar(char)) {
       editorSelectedSpike = { row: cell.row, col: cell.col };
       editorSpikeDistance = parseInt(char, 10) || 0;
-      setEditorStatus('Spike selected - drag its ghost, line or handle', '#ffdd33');
+      // Keep the palette (and the next spike placed) in step with this one
+      const meta = getSpikeMeta(cell.row, cell.col);
+      editorSpikeDirection = meta.dir;
+      editorSpikeSpeed = meta.speed;
+      setEditorStatus('Spike selected - drag the ghost, the trigger or the spike itself', '#ffdd33');
     } else if (char === 'S' || char === 'D') {
       editorDrag = {
         type: 'entity', char: char, at: { row: cell.row, col: cell.col }, under: '.',
@@ -1603,7 +1989,7 @@ function editorMouseDown(x, y, button, event) {
     if (!rightClick && editorTool === 'spike') {
       editorSelectedSpike = { row: cell.row, col: cell.col };
       editorTool = 'select';
-      setEditorStatus('Spike placed - drag its ghost, line or handle. Press K for another spike.', '#ffdd33');
+      setEditorStatus('Spike placed - drag the ghost to aim it, the trigger to place it. K for another.', '#ffdd33');
     }
   }
 }
@@ -1631,9 +2017,14 @@ function editorMouseMove(x, y, event) {
       if (isSpikeChar(editorDrag.char)) editorSelectedSpike = { row: cell.row, col: cell.col };
       break;
     }
-    case 'trigger': updateSpikeTriggerDrag(x); break;
-    case 'length': updateSpikeLengthDrag(y); break;
-    case 'ghost': updateSpikeGhostDrag(x); break;
+    case 'triggerMove': updateTriggerMoveDrag(x, y); break;
+    case 'triggerStart': updateTriggerCornerDrag(x, y, false); break;
+    case 'triggerEnd': updateTriggerCornerDrag(x, y, true); break;
+    case 'ghost': updateSpikeGhostDrag(x, y); break;
+    case 'spikeMove': {
+      if (editorHoverCell) updateSpikeMoveDrag(editorHoverCell);
+      break;
+    }
     case 'entity': {
       if (editorHoverCell) updateEntityDrag(editorHoverCell);
       break;
@@ -1753,38 +2144,66 @@ function editorKeyDown(e) {
     return;
   }
 
-  // Trigger fine-tuning with the arrow keys
+  // Trigger fine-tuning with the arrow keys: move it, or resize with ALT
   if (editorSelectedSpike && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.code)) {
     e.preventDefault();
-    const meta = getSpikeMeta(editorSelectedSpike.row, editorSelectedSpike.col);
+    const { row, col } = editorSelectedSpike;
+    const meta = getSpikeMeta(row, col);
+    const step = e.shiftKey ? TILE_SIZE / 2 : ED_TRIGGER_SNAP;
+    const dx = (e.code === 'ArrowLeft' ? -step : 0) + (e.code === 'ArrowRight' ? step : 0);
+    const dy = (e.code === 'ArrowUp' ? -step : 0) + (e.code === 'ArrowDown' ? step : 0);
 
-    if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
-      const step = e.shiftKey ? 1 : 0.25;
-      // Moving the line right on screen means a smaller (more negative) offset
-      meta.trigger = Math.round((meta.trigger + (e.code === 'ArrowLeft' ? step : -step)) * 100) / 100;
-    } else if (meta.length === null) {
-      // A full-height trigger only reacts to being shortened
-      if (e.code === 'ArrowDown') meta.length = 720;
+    if (e.altKey) {
+      // Resize from the end corner
+      meta.area.w = Math.max(0, meta.area.w + dx);
+      meta.area.h = Math.max(ED_MIN_TRIGGER_HEIGHT, meta.area.h + dy);
     } else {
-      const step = e.shiftKey ? 60 : 20;
-      let next = meta.length + (e.code === 'ArrowUp' ? step : -step);
-      if (Math.abs(next) < 20) next = e.code === 'ArrowUp' ? 20 : -20;
-      meta.length = Math.max(-900, Math.min(900, next));
-      // Pushing past the top of the screen means full height again
-      if (e.code === 'ArrowUp' && next >= 780) meta.length = null;
+      meta.area.x += dx;
+      meta.area.y += dy;
     }
+    clampTriggerArea(meta.area, row, col);
     editorDirty = true;
     return;
   }
 
-  // H: snap the selected trigger back to full screen height
+  // H: snap the selected trigger back to the full screen height
   if (e.code === 'KeyH') {
     if (editorSelectedSpike) {
-      const meta = getSpikeMeta(editorSelectedSpike.row, editorSelectedSpike.col);
-      meta.length = meta.length === null ? 120 : null;
-      editorDirty = true;
-      setEditorStatus(meta.length === null ? 'Trigger covers the full height' : 'Trigger limited to 120px', '#ffdd33');
+      const { row, col } = editorSelectedSpike;
+      const g = getSpikeGeometry(row, col);
+      const meta = getSpikeMeta(row, col);
+      pushEditorUndo();
+      if (g.isFull) {
+        meta.area.y = -20;   // a 120px band centred on the spike top
+        meta.area.h = 120;
+        setEditorStatus('Trigger limited to 120px', '#ffdd33');
+      } else {
+        setTriggerFullHeight(row, col);
+        setEditorStatus('Trigger covers the full height', '#ffdd33');
+      }
     }
+    return;
+  }
+
+  // R: rotate the selected spike through the eight directions
+  if (e.code === 'KeyR') {
+    const current = editorActiveSpikeSettings();
+    const order = ['right', 'downRight', 'down', 'downLeft', 'left', 'upLeft', 'up', 'upRight'];
+    const next = order[(order.indexOf(normalizeSpikeDirection(current.dir)) + (e.shiftKey ? order.length - 1 : 1)) % order.length];
+    editorSpikeDirection = next;
+    if (editorSelectedSpike) setSelectedSpikeDirection(next);
+    else setEditorStatus('New spikes shoot ' + SPIKE_DIRECTIONS[next].arrow + ' ' + next, '#ffdd33');
+    return;
+  }
+
+  // - / + : how fast the selected spike dashes
+  if (e.code === 'Minus' || e.code === 'NumpadSubtract' || e.code === 'Equal' || e.code === 'NumpadAdd') {
+    const up = e.code === 'Equal' || e.code === 'NumpadAdd';
+    const current = editorActiveSpikeSettings();
+    const next = edSpeedStep(current.speed, up ? 1 : -1);
+    editorSpikeSpeed = next;
+    if (editorSelectedSpike) setSelectedSpikeSpeed(next);
+    else setEditorStatus('New spike speed ' + next, '#ffdd33');
     return;
   }
 
