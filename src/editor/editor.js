@@ -149,7 +149,7 @@ function triggerAreaFromLevel(level, index, row, col) {
   const spikeTop = tileY + 20;
   const x = -trigger * TILE_SIZE;
 
-  if (length === null) return { x: x, y: -tileY, w: 0, h: canvas.height };      // full height
+  if (length === null) return { x: x, y: -tileY, w: 0, h: GAME_HEIGHT };      // full height
   if (length > 0) return { x: x, y: spikeTop - length - tileY, w: 0, h: length }; // upward
   return { x: x, y: spikeTop - tileY, w: 0, h: Math.abs(length) };               // downward
 }
@@ -165,7 +165,7 @@ function triggerAreaToLevelFields(area, row) {
   const close = (a, b) => Math.abs(a - b) < 0.001;
 
   if (area.w === 0) {
-    if (close(top, 0) && close(bottom, canvas.height)) {
+    if (close(top, 0) && close(bottom, GAME_HEIGHT)) {
       return { trigger: trigger, length: null, area: null };          // full height
     }
     if (area.h > 0 && close(bottom, spikeTop)) {
@@ -244,7 +244,7 @@ function editorDocToLevel(doc) {
 // shooting the way the palette is currently set.
 function makeSpikeMeta(row) {
   return {
-    area: { x: -ED_DEFAULT_TRIGGER * TILE_SIZE, y: -row * TILE_SIZE, w: 0, h: canvas.height },
+    area: { x: -ED_DEFAULT_TRIGGER * TILE_SIZE, y: -row * TILE_SIZE, w: 0, h: GAME_HEIGHT },
     dir: normalizeSpikeDirection(editorSpikeDirection),
     speed: normalizeSpikeSpeed(editorSpikeSpeed)
   };
@@ -509,7 +509,7 @@ function getSpikeGeometry(row, col) {
     digit, meta, x, y, spikeTop, moveDistance, vector,
     triggerX, triggerY, triggerW, triggerH,
     // A zero-width trigger that spans the whole map is the classic default
-    isFull: triggerW === 0 && triggerY <= 0.001 && triggerY + triggerH >= canvas.height - 0.001,
+    isFull: triggerW === 0 && triggerY <= 0.001 && triggerY + triggerH >= GAME_HEIGHT - 0.001,
     isLine: triggerW === 0,
     // Where the spike ends up once it fires
     ghostX: x + vector.dx * moveDistance,
@@ -573,6 +573,7 @@ function buildEditorLayout() {
   push('undo', 878, 684, 66, 28);
   push('redo', 950, 684, 66, 28);
   push('clear', 1022, 684, 78, 28);
+  push('fullscreen', 1108, 684, 82, 28);
 
   editorButtons = b;
   return b;
@@ -764,7 +765,7 @@ function drawEditor() {
 
   // Editor chrome background
   ctx.fillStyle = '#16161d';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
   drawEditorGridArea();
   drawEditorTopBar();
@@ -1185,12 +1186,12 @@ function drawEditorCursorPreview() {
 // --- top bar ---
 function drawEditorTopBar() {
   ctx.fillStyle = '#20202a';
-  ctx.fillRect(0, 0, canvas.width, ED_TOPBAR_H);
+  ctx.fillRect(0, 0, GAME_WIDTH, ED_TOPBAR_H);
   ctx.strokeStyle = '#33333f';
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(0, ED_TOPBAR_H - 0.5);
-  ctx.lineTo(canvas.width, ED_TOPBAR_H - 0.5);
+  ctx.lineTo(GAME_WIDTH, ED_TOPBAR_H - 0.5);
   ctx.stroke();
 
   const byId = id => editorButtons.find(b => b.id === id);
@@ -1261,11 +1262,11 @@ function drawEditorTopBar() {
 // --- left tool palette ---
 function drawEditorPalette() {
   ctx.fillStyle = '#1b1b23';
-  ctx.fillRect(0, ED_TOPBAR_H, ED_PALETTE_W, canvas.height - ED_TOPBAR_H);
+  ctx.fillRect(0, ED_TOPBAR_H, ED_PALETTE_W, GAME_HEIGHT - ED_TOPBAR_H);
   ctx.strokeStyle = '#33333f';
   ctx.beginPath();
   ctx.moveTo(ED_PALETTE_W - 0.5, ED_TOPBAR_H);
-  ctx.lineTo(ED_PALETTE_W - 0.5, canvas.height);
+  ctx.lineTo(ED_PALETTE_W - 0.5, GAME_HEIGHT);
   ctx.stroke();
 
   ctx.fillStyle = '#7f7f92';
@@ -1385,13 +1386,16 @@ function drawEditorPalette() {
 // --- bottom status bar ---
 function drawEditorBottomBar() {
   ctx.fillStyle = '#20202a';
-  ctx.fillRect(ED_PALETTE_W, ED_BOTTOM_Y, canvas.width - ED_PALETTE_W, canvas.height - ED_BOTTOM_Y);
+  ctx.fillRect(ED_PALETTE_W, ED_BOTTOM_Y, GAME_WIDTH - ED_PALETTE_W, GAME_HEIGHT - ED_BOTTOM_Y);
 
   const byId = id => editorButtons.find(b => b.id === id);
   edDrawButton(byId('grid'), 'GRID', { active: editorShowGrid, font: 'bold 12px Arial, sans-serif' });
   edDrawButton(byId('undo'), 'UNDO', { disabled: editorUndoStack.length === 0, font: 'bold 12px Arial, sans-serif' });
   edDrawButton(byId('redo'), 'REDO', { disabled: editorRedoStack.length === 0, font: 'bold 12px Arial, sans-serif' });
   edDrawButton(byId('clear'), 'CLEAR', { font: 'bold 12px Arial, sans-serif', textColor: '#ff9999' });
+  edDrawButton(byId('fullscreen'), isFullscreenActive() ? 'WINDOW' : 'FULL',
+               { active: isFullscreenActive(), activeColor: '#2f6f68', borderColor: '#44ddcc',
+                 font: 'bold 12px Arial, sans-serif' });
 
   ctx.textAlign = 'left';
 
@@ -1441,7 +1445,7 @@ function drawEditorBottomBar() {
 // --- help overlay ---
 function drawEditorHelpOverlay() {
   ctx.fillStyle = 'rgba(8, 7, 13, 0.86)';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
   const boxX = 150, boxY = 36, boxW = 900, boxH = 660;
   if (typeof uiCard === 'function') {
@@ -1463,7 +1467,7 @@ function drawEditorHelpOverlay() {
   ctx.fillStyle = '#9844ff';
   ctx.font = 'bold 30px Impact, monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('LEVEL EDITOR HELP', canvas.width / 2, boxY + 40);
+  ctx.fillText('LEVEL EDITOR HELP', GAME_WIDTH / 2, boxY + 40);
   ctx.fillStyle = 'rgba(255,255,255,0.08)';
   ctx.fillRect(boxX + 40, boxY + 56, boxW - 80, 1);
 
@@ -1497,6 +1501,7 @@ function drawEditorHelpOverlay() {
     ['LEVEL', [
       'CTRL+Z / CTRL+Y ......... undo / redo',
       'CTRL+S .................. save',
+      'SHIFT+F ................. fullscreen (or the FULL button, bottom right)',
       'ENTER ................... test play      ESC ... back'
     ]]
   ];
@@ -1520,7 +1525,7 @@ function drawEditorHelpOverlay() {
   ctx.fillStyle = '#8a8a9c';
   ctx.font = '14px Arial, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('Click anywhere or press ? / ESC to close', canvas.width / 2, boxY + boxH - 18);
+  ctx.fillText('Click anywhere or press ? / ESC to close', GAME_WIDTH / 2, boxY + boxH - 18);
   ctx.textAlign = 'left';
 }
 
@@ -1791,17 +1796,17 @@ function clampTriggerArea(area, row, col) {
   const tileX = col * TILE_SIZE;
   const tileY = row * TILE_SIZE;
 
-  area.w = Math.max(0, Math.min(canvas.width, area.w));
-  area.h = Math.max(ED_MIN_TRIGGER_HEIGHT, Math.min(canvas.height, area.h));
-  area.x = Math.max(-tileX - TILE_SIZE, Math.min(canvas.width - tileX, area.x));
-  area.y = Math.max(-tileY - TILE_SIZE, Math.min(canvas.height - tileY, area.y));
+  area.w = Math.max(0, Math.min(GAME_WIDTH, area.w));
+  area.h = Math.max(ED_MIN_TRIGGER_HEIGHT, Math.min(GAME_HEIGHT, area.h));
+  area.x = Math.max(-tileX - TILE_SIZE, Math.min(GAME_WIDTH - tileX, area.x));
+  area.y = Math.max(-tileY - TILE_SIZE, Math.min(GAME_HEIGHT - tileY, area.y));
 }
 
 // Snap the trigger back to the full-height line the game uses by default
 function setTriggerFullHeight(row, col) {
   const meta = getSpikeMeta(row, col);
   meta.area.y = -row * TILE_SIZE;
-  meta.area.h = canvas.height;
+  meta.area.h = GAME_HEIGHT;
   meta.area.w = 0;
 }
 
@@ -1918,6 +1923,7 @@ function editorHandleButton(btn) {
     case 'undo': editorUndo(); break;
     case 'redo': editorRedo(); break;
     case 'clear': clearEditorLevel(); break;
+    case 'fullscreen': toggleFullscreen(); break;
   }
 }
 
@@ -2216,6 +2222,13 @@ function editorKeyDown(e) {
     editorSpikeSpeed = next;
     if (editorSelectedSpike) setSelectedSpikeSpeed(next);
     else setEditorStatus('New spike speed ' + next, '#ffdd33');
+    return;
+  }
+
+  // SHIFT+F : fullscreen (plain F is the FAKE block tool)
+  if (e.shiftKey && e.code === 'KeyF') {
+    e.preventDefault();
+    toggleFullscreen();
     return;
   }
 

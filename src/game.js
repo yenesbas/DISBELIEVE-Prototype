@@ -9,6 +9,282 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
+// ===== DISPLAY =====
+// The whole game is drawn in a fixed 1200x720 coordinate space, so every
+// layout number in this file (and in the editor) is written against these two
+// constants and never against the canvas element itself. The canvas is then
+// stretched to fit the window - or the entire screen in fullscreen - and its
+// backing store follows the display's pixel density, so the same drawing code
+// stays sharp at any size. See layoutDisplay() and applyDisplayTransform().
+const GAME_WIDTH = 1200;
+const GAME_HEIGHT = 720;
+
+// Used when the page around the canvas cannot be measured for some reason.
+const WINDOWED_CHROME_FALLBACK = 300;
+const WINDOWED_SIDE_MARGIN = 24;
+// Past three times the game's own resolution the extra pixels cost more than
+// they show, even on a 5K screen.
+const MAX_BACKING_SCALE = 3;
+const DISPLAY_SETTINGS_KEY = 'disbelieveDisplay';
+
+const gameStage = document.getElementById('gameStage');
+
+let fullscreenPreferred = false; // The last choice the player made, remembered
+let fullscreenRestoreDone = false;
+let fullscreenRequestPending = false; // A request is in flight (they are async)
+let fullscreenRequestTimer = null;    // Gives up on a request that never answers
+let fullscreenWasActive = false;      // Last state the game reacted to
+
+function isFullscreenActive() {
+  const el = document.fullscreenElement || document.webkitFullscreenElement;
+  return !!el && (el === gameStage || el === canvas || el.contains(canvas));
+}
+
+function fullscreenSupported() {
+  if (!gameStage) return false;
+  if (document.fullscreenEnabled === false || document.webkitFullscreenEnabled === false) return false;
+  return !!(gameStage.requestFullscreen || gameStage.webkitRequestFullscreen);
+}
+
+// How much vertical room the page needs around the canvas: the title and
+// controls above it, the death counter below it, the gaps between them and the
+// stage's own frame. Measured rather than assumed, because that text rewraps.
+function measurePageChrome() {
+  const container = gameStage && gameStage.parentElement;
+  if (!container) return WINDOWED_CHROME_FALLBACK;
+
+  let used = 0;
+  for (let i = 0; i < container.children.length; i++) {
+    const child = container.children[i];
+    if (child !== gameStage) used += child.getBoundingClientRect().height;
+  }
+
+  const containerStyle = window.getComputedStyle(container);
+  const gap = parseFloat(containerStyle.rowGap) || 0;
+  used += gap * Math.max(0, container.children.length - 1);
+
+  const bodyStyle = window.getComputedStyle(document.body);
+  used += (parseFloat(bodyStyle.paddingTop) || 0) + (parseFloat(bodyStyle.paddingBottom) || 0);
+  used += Math.max(0, gameStage.offsetHeight - canvas.offsetHeight); // the stage's border
+
+  return used;
+}
+
+// Fit the canvas into the space available, keeping the 5:3 shape: the whole
+// screen in fullscreen, otherwise the window minus the text around the game.
+function layoutDisplay() {
+  const fullscreen = isFullscreenActive();
+
+  // CSS pixels per game pixel: as large as the space allows, in a window as
+  // much as on the whole screen. Nothing is laid out in page pixels any more,
+  // so the game can be bigger than the 1200x720 it is authored at.
+  let scale = fullscreen
+    ? Math.min(window.innerWidth / GAME_WIDTH, window.innerHeight / GAME_HEIGHT)
+    : Math.min((window.innerWidth - WINDOWED_SIDE_MARGIN) / GAME_WIDTH,
+               (window.innerHeight - measurePageChrome()) / GAME_HEIGHT);
+  scale = Math.max(scale, 0.3);
+
+  const cssW = Math.round(GAME_WIDTH * scale);
+  const cssH = Math.round(GAME_HEIGHT * scale);
+  canvas.style.width = cssW + 'px';
+  canvas.style.height = cssH + 'px';
+
+  // Draw at the display's real pixel density so text and edges stay crisp
+  // instead of being upscaled from 1200x720.
+  const dpr = window.devicePixelRatio || 1;
+  const density = Math.min(scale * dpr, MAX_BACKING_SCALE);
+  const backingW = Math.round(GAME_WIDTH * density);
+  const backingH = Math.round(GAME_HEIGHT * density);
+  if (canvas.width !== backingW || canvas.height !== backingH) {
+    // Resizing clears the canvas; the next frame draws everything again.
+    canvas.width = backingW;
+    canvas.height = backingH;
+  }
+
+  // Nearest-neighbour only while the backing store lands on whole device
+  // pixels; past the density cap it would double pixels unevenly, and smooth
+  // scaling looks better than that.
+  canvas.style.imageRendering = Math.abs(backingW - cssW * dpr) < 1 ? 'pixelated' : 'auto';
+
+  document.body.classList.toggle('fullscreen', fullscreen);
+}
+
+// Browsers fire fullscreenchange before the viewport has finished resizing,
+// so the size read during the event can be the old one. Lay out again once the
+// next frames have landed.
+function relayoutSoon() {
+  requestAnimationFrame(layoutDisplay);
+  setTimeout(layoutDisplay, 150);
+}
+
+// Every frame starts here: map the fixed game space onto the backing store.
+function applyDisplayTransform() {
+  ctx.setTransform(canvas.width / GAME_WIDTH, 0, 0, canvas.height / GAME_HEIGHT, 0, 0);
+}
+
+// Turn a page position (a mouse event) into game coordinates.
+function canvasPointFromEvent(event) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (event.clientX - rect.left) * (GAME_WIDTH / rect.width),
+    y: (event.clientY - rect.top) * (GAME_HEIGHT / rect.height)
+  };
+}
+
+function loadDisplaySettings() {
+  try {
+    const saved = localStorage.getItem(DISPLAY_SETTINGS_KEY);
+    if (saved) fullscreenPreferred = !!JSON.parse(saved).fullscreen;
+  } catch (e) {
+    // A blocked localStorage just means there is no remembered preference
+  }
+}
+
+function saveDisplaySettings() {
+  try {
+    localStorage.setItem(DISPLAY_SETTINGS_KEY, JSON.stringify({ fullscreen: fullscreenPreferred }));
+  } catch (e) {
+    console.warn('Could not save display settings:', e);
+  }
+}
+
+// A one-line message for the rare case where fullscreen is refused. The menus
+// already have a notice line; the editor has its own status bar.
+function showDisplayNotice(text) {
+  if (gameState === 'editor' && typeof setEditorStatus === 'function') {
+    setEditorStatus(text, '#ffaa55');
+  } else {
+    menuNotice = text;
+    menuNoticeTimer = 4;
+  }
+  console.warn(text);
+}
+
+function enterFullscreen() {
+  if (fullscreenRequestPending || isFullscreenActive()) return;
+  if (!fullscreenSupported()) {
+    fullscreenPreferred = false;
+    saveDisplaySettings();
+    showDisplayNotice('FULLSCREEN IS NOT AVAILABLE IN THIS BROWSER');
+    return;
+  }
+  const refused = () => {
+    clearTimeout(fullscreenRequestTimer);
+    fullscreenRequestPending = false;
+    fullscreenPreferred = false;
+    saveDisplaySettings();
+    showDisplayNotice('THE BROWSER BLOCKED FULLSCREEN');
+  };
+  const request = gameStage.requestFullscreen || gameStage.webkitRequestFullscreen;
+  fullscreenRequestPending = true;
+  // Some browsers leave a refused request hanging - neither resolved nor
+  // rejected - and that must not block the next attempt for good.
+  clearTimeout(fullscreenRequestTimer);
+  fullscreenRequestTimer = setTimeout(() => { fullscreenRequestPending = false; }, 1500);
+  try {
+    const result = request.call(gameStage, { navigationUI: 'hide' });
+    if (result && result.catch) result.catch(refused);
+  } catch (e) {
+    refused();
+  }
+}
+
+function exitFullscreen() {
+  const exit = document.exitFullscreen || document.webkitExitFullscreen;
+  if (!exit) return;
+  try {
+    const result = exit.call(document);
+    if (result && result.catch) result.catch(() => {});
+  } catch (e) {
+    // Already out of fullscreen
+  }
+}
+
+// The one entry point behind the F key, the settings toggle, the pause menu
+// and the editor's FULL button.
+function toggleFullscreen() {
+  fullscreenRestoreDone = true; // The player has chosen; nothing left to restore
+  if (isFullscreenActive()) {
+    fullscreenPreferred = false;
+    saveDisplaySettings();
+    exitFullscreen();
+  } else {
+    fullscreenPreferred = true;
+    saveDisplaySettings();
+    enterFullscreen();
+  }
+}
+
+function onFullscreenChange() {
+  clearTimeout(fullscreenRequestTimer);
+  fullscreenRequestPending = false;
+  const fullscreen = isFullscreenActive();
+  fullscreenWasActive = fullscreen;
+  layoutDisplay();
+  relayoutSoon();
+
+  // Leaving through the browser's own ESC counts as a choice too
+  if (fullscreenPreferred !== fullscreen) {
+    fullscreenPreferred = fullscreen;
+    saveDisplaySettings();
+  }
+
+  // ESC is taken by the browser to leave fullscreen, so the keypress never
+  // reaches the game and the player loses the pause menu they asked for -
+  // and a level would keep running while the window resizes. Pause for them.
+  if (!fullscreen && gameState === 'playing') {
+    gameState = 'paused';
+  }
+}
+
+// Not every browser fires fullscreenchange reliably - leaving fullscreen can
+// go unannounced - so the game loop watches the state as well. Reading
+// document.fullscreenElement is cheap; it forces no layout.
+function pollFullscreenState() {
+  if (isFullscreenActive() !== fullscreenWasActive) onFullscreenChange();
+}
+
+// Browsers only allow fullscreen from a user gesture, so a preference carried
+// over from the last session waits for the player's first click or keypress.
+function restoreFullscreenOnFirstGesture() {
+  if (!fullscreenPreferred) return;
+  const tryRestore = () => {
+    if (fullscreenRestoreDone) return;
+    fullscreenRestoreDone = true;
+    if (fullscreenPreferred && !isFullscreenActive()) enterFullscreen();
+  };
+  window.addEventListener('pointerdown', tryRestore, { once: true });
+  window.addEventListener('keydown', tryRestore, { once: true });
+}
+
+function setupDisplay() {
+  loadDisplaySettings();
+  fullscreenWasActive = isFullscreenActive();
+  layoutDisplay();
+  window.addEventListener('resize', layoutDisplay);
+  window.addEventListener('orientationchange', layoutDisplay);
+  document.addEventListener('fullscreenchange', onFullscreenChange);
+  document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+  restoreFullscreenOnFirstGesture();
+}
+
+// The level name and death counter live in the page below the canvas. In
+// fullscreen there is no page, so draw them into the corner instead.
+function drawFullscreenHud() {
+  const active = getActiveLevelData();
+  ctx.save();
+  ctx.textAlign = 'right';
+  ctx.font = '15px monospace';
+  if (active && active.name) {
+    ctx.fillStyle = 'rgba(232, 228, 245, 0.5)';
+    ctx.fillText(active.name, GAME_WIDTH - 16, 26);
+  }
+  ctx.fillStyle = 'rgba(255, 120, 120, 0.65)';
+  ctx.fillText('DEATHS ' + deaths, GAME_WIDTH - 16, 46);
+  ctx.restore();
+  ctx.textAlign = 'left';
+}
+
 // Game constants
 const TILE_SIZE = 60;
 const GRAVITY = 2100 * 1.5; // Adjusted for time-based physics
@@ -661,6 +937,7 @@ function resumeGame() {
 // Initialize game
 function init() {
   loadProgress(); // Load saved progress
+  setupDisplay(); // Size the canvas to the window / screen (see DISPLAY above)
   setupAudioControls();
   // Attempt to enable audio when the user interacts (click or key) to satisfy browser autoplay policies
   document.addEventListener('click', tryEnableAudio, { once: true });
@@ -808,7 +1085,7 @@ function parseLevel() {
           if (triggerLength === null || triggerLength === 0) {
             // Full-height trigger (default behavior)
             triggerY = 0;
-            triggerHeight = canvas.height;
+            triggerHeight = GAME_HEIGHT;
           } else if (triggerLength > 0) {
             // POSITIVE: extends UPWARD from spike top
             triggerY = spikeTopY - triggerLength;
@@ -1238,8 +1515,8 @@ function update(deltaTime) {
 
   // Keep player in bounds horizontally
   if (player.x < 0) player.x = 0;
-  if (player.x + player.width > canvas.width) {
-    player.x = canvas.width - player.width;
+  if (player.x + player.width > GAME_WIDTH) {
+    player.x = GAME_WIDTH - player.width;
   }
 
   // Horizontal collision check
@@ -1449,7 +1726,7 @@ function update(deltaTime) {
   }
 
   // Fall off screen = death
-  if (player.y > canvas.height + 100) {
+  if (player.y > GAME_HEIGHT + 100) {
     die();
   }
   
@@ -1691,25 +1968,25 @@ function drawStyledBackground(style) {
   switch(style) {
     case 'neon':
       // Neon glow - dark background with gradient
-      const neonGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      const neonGradient = ctx.createLinearGradient(0, 0, 0, GAME_HEIGHT);
       neonGradient.addColorStop(0, '#0a0a1a');
       neonGradient.addColorStop(1, '#1a0a2a');
       ctx.fillStyle = neonGradient;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
       
       // Add subtle grid
       ctx.strokeStyle = 'rgba(100, 100, 255, 0.1)';
       ctx.lineWidth = 1;
-      for (let x = 0; x < canvas.width; x += 40) {
+      for (let x = 0; x < GAME_WIDTH; x += 40) {
         ctx.beginPath();
         ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvas.height);
+        ctx.lineTo(x, GAME_HEIGHT);
         ctx.stroke();
       }
-      for (let y = 0; y < canvas.height; y += 40) {
+      for (let y = 0; y < GAME_HEIGHT; y += 40) {
         ctx.beginPath();
         ctx.moveTo(0, y);
-        ctx.lineTo(canvas.width, y);
+        ctx.lineTo(GAME_WIDTH, y);
         ctx.stroke();
       }
       break;
@@ -1717,14 +1994,14 @@ function drawStyledBackground(style) {
     case 'sketch':
       // Hand-drawn paper texture (static)
       ctx.fillStyle = '#f5f5dc'; // Beige paper color
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
       
       // Add paper texture (static pattern)
       ctx.fillStyle = 'rgba(0, 0, 0, 0.03)';
       // Use deterministic pattern instead of random
       for (let i = 0; i < 200; i++) {
-        const x = (i * 37) % canvas.width;
-        const y = (i * 53) % canvas.height;
+        const x = (i * 37) % GAME_WIDTH;
+        const y = (i * 53) % GAME_HEIGHT;
         ctx.fillRect(x, y, 2, 2);
       }
       break;
@@ -1732,16 +2009,16 @@ function drawStyledBackground(style) {
     case 'glitch':
       // Digital corruption
       ctx.fillStyle = '#000000';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
       
       // Random scan lines
       ctx.strokeStyle = 'rgba(0, 255, 100, 0.1)';
       ctx.lineWidth = 1;
-      for (let y = 0; y < canvas.height; y += 4) {
+      for (let y = 0; y < GAME_HEIGHT; y += 4) {
         if (Math.random() > 0.5) {
           ctx.beginPath();
           ctx.moveTo(0, y);
-          ctx.lineTo(canvas.width, y);
+          ctx.lineTo(GAME_WIDTH, y);
           ctx.stroke();
         }
       }
@@ -1750,19 +2027,19 @@ function drawStyledBackground(style) {
     case 'surreal':
       // Abstract/surreal - static gradient colors
       const surrealGradient = ctx.createRadialGradient(
-        canvas.width/2, canvas.height/2, 0,
-        canvas.width/2, canvas.height/2, canvas.width
+        GAME_WIDTH/2, GAME_HEIGHT/2, 0,
+        GAME_WIDTH/2, GAME_HEIGHT/2, GAME_WIDTH
       );
       surrealGradient.addColorStop(0, 'hsl(240, 40%, 15%)');
       surrealGradient.addColorStop(1, 'hsl(280, 40%, 10%)');
       ctx.fillStyle = surrealGradient;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
       break;
       
     default:
       // Default minimalist style
       ctx.fillStyle = DEVELOPER_MODE ? '#1a1a3a' : '#2a2a2a';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
   }
 }
 
@@ -2672,6 +2949,9 @@ function drawStyledGravityZone(zone, isActive, style) {
 
 // Render game
 function render() {
+  // The canvas may have been resized for the window or for fullscreen
+  applyDisplayTransform();
+
   // Get current visual style
   const visualStyle = (gameState === 'playing' || gameState === 'paused' || gameState === 'levelComplete') 
     ? getCurrentVisualStyle() 
@@ -2871,7 +3151,7 @@ function render() {
       ctx.fillStyle = color;
       ctx.font = 'bold 24px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(text, canvas.width / 2, 50);
+      ctx.fillText(text, GAME_WIDTH / 2, 50);
       ctx.restore();
     }
   }
@@ -2879,7 +3159,7 @@ function render() {
   // Death flash
   if (isDead && deathFlashTimer > 0 && gameState === 'playing') {
     ctx.fillStyle = `rgba(255, 0, 0, ${deathFlashTimer / DEATH_FLASH_DURATION * 0.5})`;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
     // Draw "X_X" face (scaled)
     ctx.fillStyle = '#ff0000';
@@ -2905,6 +3185,11 @@ function render() {
     drawCustomSessionOverlay();
   }
 
+  // In fullscreen the page's level name and death counter are off screen
+  if (isFullscreenActive() && (gameState === 'playing' || gameState === 'levelComplete')) {
+    drawFullscreenHud();
+  }
+
   // Draw pause menu overlay if paused (must be after game is drawn)
   if (gameState === 'paused') {
     drawPauseMenu();
@@ -2918,7 +3203,7 @@ function render() {
 function renderTransition() {
   if (transitionState !== 'none' && transitionAlpha > 0) {
     ctx.fillStyle = `rgba(0, 0, 0, ${transitionAlpha})`;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
   }
 }
 
@@ -2928,16 +3213,16 @@ function uiPopup(w, h, accent, dim) {
   const intro = easeOutCubic(clamp01(screenIntro / 0.28));
 
   ctx.fillStyle = 'rgba(8, 7, 13, ' + (0.82 * intro).toFixed(3) + ')';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
   if (dim) {
     ctx.fillStyle = dim;
     ctx.globalAlpha = intro;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     ctx.globalAlpha = 1;
   }
 
-  const x = canvas.width / 2 - w / 2;
-  const y = canvas.height / 2 - h / 2;
+  const x = GAME_WIDTH / 2 - w / 2;
+  const y = GAME_HEIGHT / 2 - h / 2;
 
   ctx.save();
   ctx.globalAlpha = intro;
@@ -3008,16 +3293,16 @@ function drawLevelCompletePopup() {
   ctx.textAlign = 'center';
   ctx.font = 'bold 44px Impact, monospace';
   ctx.fillStyle = accent;
-  ctx.fillText('LEVEL COMPLETE', canvas.width / 2, box.y + 64);
+  ctx.fillText('LEVEL COMPLETE', GAME_WIDTH / 2, box.y + 64);
 
   const active = getActiveLevelData();
   if (active && active.name) {
     ctx.font = '14px monospace';
     ctx.fillStyle = '#7a6f9a';
-    ctx.fillText(active.name, canvas.width / 2, box.y + 92);
+    ctx.fillText(active.name, GAME_WIDTH / 2, box.y + 92);
   }
 
-  uiStarBurst(canvas.width / 2, box.y + 172, stars, 46);
+  uiStarBurst(GAME_WIDTH / 2, box.y + 172, stars, 46);
 
   ctx.fillStyle = 'rgba(255,255,255,0.08)';
   ctx.fillRect(box.x + 54, box.y + 206, box.w - 108, 1);
@@ -3035,7 +3320,7 @@ function drawLevelCompletePopup() {
   ctx.textAlign = 'center';
   ctx.font = stars === 3 ? 'bold 17px Arial, sans-serif' : '17px Arial, sans-serif';
   ctx.fillStyle = accent;
-  ctx.fillText(messages[stars], canvas.width / 2, box.y + 370);
+  ctx.fillText(messages[stars], GAME_WIDTH / 2, box.y + 370);
 
   // What happens next, with the auto-advance timer draining underneath
   let footer;
@@ -3048,10 +3333,10 @@ function drawLevelCompletePopup() {
   }
   ctx.font = '14px Arial, sans-serif';
   ctx.fillStyle = '#8a84a0';
-  ctx.fillText(footer, canvas.width / 2, box.y + 404);
+  ctx.fillText(footer, GAME_WIDTH / 2, box.y + 404);
 
   const barW = box.w - 200;
-  const barX = canvas.width / 2 - barW / 2;
+  const barX = GAME_WIDTH / 2 - barW / 2;
   const left = clamp01(levelCompleteTimer / LEVEL_COMPLETE_DURATION);
   ctx.fillStyle = '#292437';
   uiRoundRect(barX, box.y + 414, barW, 4, 2);
@@ -3073,11 +3358,11 @@ function drawUnlockPopup() {
   ctx.textAlign = 'center';
   ctx.font = 'bold 44px Impact, monospace';
   ctx.fillStyle = '#ffcc44';
-  ctx.fillText('NEW UNLOCKS', canvas.width / 2, box.y + 68);
+  ctx.fillText('NEW UNLOCKS', GAME_WIDTH / 2, box.y + 68);
 
   ctx.font = '16px Arial, sans-serif';
   ctx.fillStyle = '#8a84a0';
-  ctx.fillText('Chapter complete. You earned:', canvas.width / 2, box.y + 98);
+  ctx.fillText('Chapter complete. You earned:', GAME_WIDTH / 2, box.y + 98);
 
   ctx.fillStyle = 'rgba(255,255,255,0.08)';
   ctx.fillRect(box.x + 48, box.y + 118, box.w - 96, 1);
@@ -3136,7 +3421,7 @@ function drawUnlockPopup() {
   ctx.textAlign = 'center';
   ctx.font = 'bold 16px Arial, sans-serif';
   ctx.fillStyle = '#55dd88';
-  ctx.fillText('PRESS SPACE OR ENTER TO CONTINUE', canvas.width / 2, box.y + box.h - 34);
+  ctx.fillText('PRESS SPACE OR ENTER TO CONTINUE', GAME_WIDTH / 2, box.y + box.h - 34);
   ctx.restore();
 
   ctx.restore();
@@ -3147,13 +3432,13 @@ function drawUnlockPopup() {
 function drawPauseMenu() {
   // Darken the game, then blur the edges of attention with a vignette
   ctx.fillStyle = 'rgba(8, 7, 13, 0.82)';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  const vignette = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+  const vignette = ctx.createLinearGradient(0, 0, 0, GAME_HEIGHT);
   vignette.addColorStop(0, 'rgba(140, 68, 255, 0.07)');
   vignette.addColorStop(0.5, 'rgba(0, 0, 0, 0)');
   vignette.addColorStop(1, 'rgba(140, 68, 255, 0.07)');
   ctx.fillStyle = vignette;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
   const intro = easeOutCubic(clamp01(screenIntro / 0.35));
 
@@ -3162,11 +3447,11 @@ function drawPauseMenu() {
   ctx.textAlign = 'center';
   ctx.font = 'bold 72px Impact, monospace';
   ctx.fillStyle = '#9844ff';
-  ctx.fillText('PAUSED', canvas.width / 2, 178 - (1 - intro) * 14);
+  ctx.fillText('PAUSED', GAME_WIDTH / 2, 178 - (1 - intro) * 14);
   ctx.font = '15px monospace';
   ctx.fillStyle = '#7a6f9a';
   const active = getActiveLevelData();
-  if (active && active.name) ctx.fillText(active.name, canvas.width / 2, 208);
+  if (active && active.name) ctx.fillText(active.name, GAME_WIDTH / 2, 208);
   ctx.restore();
 
   window.pauseButtons = [];
@@ -3174,6 +3459,8 @@ function drawPauseMenu() {
   const entries = [
     { label: 'RESUME', action: 'resume', accent: '#55dd88' },
     { label: 'RESTART', action: 'restart', accent: '#44aaff' },
+    { label: isFullscreenActive() ? 'EXIT FULLSCREEN' : 'FULLSCREEN',
+      action: 'fullscreen', accent: '#44ddcc' },
     { label: 'SETTINGS', action: 'settings', accent: '#8c44ff' },
     { label: customLevelSession
         ? (customLevelSession.returnState === 'editor' ? 'BACK TO EDITOR' : 'BACK TO MY LEVELS')
@@ -3184,7 +3471,7 @@ function drawPauseMenu() {
   const bw = 340, bh = 58, gap = 14;
   entries.forEach((entry, index) => {
     const btn = {
-      x: canvas.width / 2 - bw / 2,
+      x: GAME_WIDTH / 2 - bw / 2,
       y: 260 + index * (bh + gap),
       width: bw, height: bh,
       action: entry.action,
@@ -3210,7 +3497,7 @@ function drawPauseMenu() {
   ctx.fillStyle = '#4a4560';
   ctx.font = '14px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('ESC  resume      R  restart', canvas.width / 2, 660);
+  ctx.fillText('ESC  resume      R  restart      F  fullscreen', GAME_WIDTH / 2, 682);
   ctx.restore();
   ctx.textAlign = 'left';
 }
@@ -3341,7 +3628,7 @@ function uiFooter(text) {
   ctx.fillStyle = '#4a4560';
   ctx.font = '14px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(text, canvas.width / 2, 700);
+  ctx.fillText(text, GAME_WIDTH / 2, 700);
   ctx.restore();
   ctx.textAlign = 'left';
 }
@@ -3421,8 +3708,8 @@ function buildUiMotes() {
   const motes = [];
   for (let i = 0; i < 18; i++) {
     motes.push({
-      x: Math.random() * canvas.width,
-      y: Math.random() * canvas.height,
+      x: Math.random() * GAME_WIDTH,
+      y: Math.random() * GAME_HEIGHT,
       size: 14 + Math.random() * 34,
       speed: 5 + Math.random() * 15,
       phase: Math.random() * Math.PI * 2,
@@ -3451,8 +3738,8 @@ function updateUiAnimation(screen, deltaTime) {
   uiMotes.forEach(m => {
     m.y -= m.speed * dt;
     if (m.y < -m.size) {
-      m.y = canvas.height + m.size;
-      m.x = Math.random() * canvas.width;
+      m.y = GAME_HEIGHT + m.size;
+      m.x = Math.random() * GAME_WIDTH;
     }
   });
 
@@ -3499,11 +3786,11 @@ function updateUiAnimation(screen, deltaTime) {
 }
 
 function drawUiBackground() {
-  const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  const sky = ctx.createLinearGradient(0, 0, 0, GAME_HEIGHT);
   sky.addColorStop(0, DEVELOPER_MODE ? '#171739' : '#15121e');
   sky.addColorStop(1, DEVELOPER_MODE ? '#0b0b1e' : '#08070d');
   ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
   // Slow drifting grid
   const cell = 60;
@@ -3511,13 +3798,13 @@ function drawUiBackground() {
   ctx.strokeStyle = 'rgba(152, 68, 255, 0.06)';
   ctx.lineWidth = 1;
   ctx.beginPath();
-  for (let x = -cell; x <= canvas.width + cell; x += cell) {
+  for (let x = -cell; x <= GAME_WIDTH + cell; x += cell) {
     ctx.moveTo(x + drift, 0);
-    ctx.lineTo(x + drift, canvas.height);
+    ctx.lineTo(x + drift, GAME_HEIGHT);
   }
-  for (let y = -cell; y <= canvas.height + cell; y += cell) {
+  for (let y = -cell; y <= GAME_HEIGHT + cell; y += cell) {
     ctx.moveTo(0, y - drift);
-    ctx.lineTo(canvas.width, y - drift);
+    ctx.lineTo(GAME_WIDTH, y - drift);
   }
   ctx.stroke();
 
@@ -3915,7 +4202,7 @@ function drawMenu() {
     ctx.font = 'bold 16px Arial, sans-serif';
     ctx.textAlign = 'center';
     const noticeW = ctx.measureText(menuNotice).width + 44;
-    const noticeX = canvas.width / 2 - noticeW / 2;
+    const noticeX = GAME_WIDTH / 2 - noticeW / 2;
     uiRoundRect(noticeX, 626, noticeW, 38, 19);
     ctx.fillStyle = 'rgba(255, 90, 90, 0.14)';
     ctx.fill();
@@ -3923,7 +4210,7 @@ function drawMenu() {
     ctx.lineWidth = 1;
     ctx.stroke();
     ctx.fillStyle = '#ff8866';
-    ctx.fillText(menuNotice, canvas.width / 2, 650);
+    ctx.fillText(menuNotice, GAME_WIDTH / 2, 650);
     ctx.restore();
   }
 
@@ -3931,8 +4218,8 @@ function drawMenu() {
   ctx.fillStyle = '#4a4560';
   ctx.font = '14px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('↑ ↓  navigate      ENTER  select      Hint: DISBELIEVE WHAT YOU SEE',
-               canvas.width / 2, 694);
+  ctx.fillText('↑ ↓  navigate      ENTER  select      F  fullscreen      Hint: DISBELIEVE WHAT YOU SEE',
+               GAME_WIDTH / 2, 694);
   ctx.globalAlpha = 1;
 
   ctx.textAlign = 'left';
@@ -4444,7 +4731,7 @@ function drawLevelSelect() {
   const perRow = 5;
   const rows = Math.ceil(chapterInfo.levels.length / perRow);
   const gridW = perRow * tile + (perRow - 1) * gap;
-  const gridX = canvas.width / 2 - gridW / 2;
+  const gridX = GAME_WIDTH / 2 - gridW / 2;
   const gridY = 210;
 
   for (let i = 0; i < chapterInfo.levels.length; i++) {
@@ -4512,7 +4799,7 @@ function drawLevelSelect() {
     const isBonusCompleted = completedLevels.has(bonusGlobalIndex);
     const bw = 228;
     const bonusBtn = {
-      x: canvas.width / 2 - bw / 2,
+      x: GAME_WIDTH / 2 - bw / 2,
       y: gridY + rows * (tile + gap) + 18,
       width: bw, height: 72,
       levelInChapter: -1,
@@ -4623,6 +4910,32 @@ function drawSettings() {
     ctx.restore();
   });
 
+  // ---- Display card ----
+  const dY = cardY + cardH + 16, dH = 112;
+  uiCard(cardX, dY, cardW, dH, {});
+  ctx.textAlign = 'left';
+  ctx.font = 'bold 22px Impact, monospace';
+  ctx.fillStyle = '#44ddcc';
+  ctx.fillText('DISPLAY', cardX + 30, dY + 38);
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.fillRect(cardX + 30, dY + 52, cardW - 60, 1);
+
+  const fullscreenOn = isFullscreenActive();
+  const fullscreenButton = {
+    x: cardX + 30, y: dY + 64, width: 260, height: 44, action: 'fullscreen'
+  };
+  uiActionButton(fullscreenButton, fullscreenOn ? 'FULLSCREEN  ON' : 'FULLSCREEN  OFF', {
+    font: '16px Arial, sans-serif', center: true, tab: false,
+    accent: '#44ddcc', textColor: fullscreenOn ? '#9ff5ea' : '#c9c4da'
+  });
+  window.fullscreenButton = fullscreenButton;
+
+  ctx.textAlign = 'left';
+  ctx.font = '14px monospace';
+  ctx.fillStyle = '#6d6688';
+  ctx.fillText('F  toggles fullscreen any time', cardX + 310, dY + 84);
+  ctx.fillText('ESC  leaves it', cardX + 310, dY + 102);
+
   // ---- Progress card ----
   const pX = 750, pW = 360;
   uiCard(pX, cardY, pW, cardH, {});
@@ -4654,15 +4967,17 @@ function drawSettings() {
 
   const backBtn = uiBackButton();
   backBtn.buttonIndex = 0;
-  window.settingsButtons.push(backBtn, resetButton);
+  window.settingsButtons.push(backBtn, fullscreenButton, resetButton);
   window.backButton = backBtn;
 
-  uiFooter('Drag the sliders to set volume      ESC  back');
+  uiFooter('Drag the sliders to set volume      F  fullscreen      ESC  back');
   ctx.textAlign = 'left';
 }
 
 // Game loop
 function gameLoop(currentTime = 0) {
+  pollFullscreenState(); // In case the browser changed it without telling us
+
   if (isPaused) {
     requestAnimationFrame(gameLoop);
     return;
@@ -4681,11 +4996,9 @@ function gameLoop(currentTime = 0) {
 
 // Handle mouse clicks on buttons
 function handleClick(event) {
-  const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-  const x = (event.clientX - rect.left) * scaleX;
-  const y = (event.clientY - rect.top) * scaleY;
+  const point = canvasPointFromEvent(event);
+  const x = point.x;
+  const y = point.y;
 
   // Check menu buttons
   if (gameState === 'menu' && window.menuButtons) {
@@ -4742,6 +5055,15 @@ function handleClick(event) {
       transitionToState(previousGameState || 'menu');
     }
     
+    // Check the fullscreen toggle
+    if (window.fullscreenButton) {
+      const fsBtn = window.fullscreenButton;
+      if (x >= fsBtn.x && x <= fsBtn.x + fsBtn.width &&
+          y >= fsBtn.y && y <= fsBtn.y + fsBtn.height) {
+        toggleFullscreen();
+      }
+    }
+
     // Check reset button
     if (window.resetButton) {
       const resetBtn = window.resetButton;
@@ -4818,6 +5140,8 @@ function handleClick(event) {
             loadLevel(currentLevel);
             gameState = 'playing';
           }
+        } else if (button.action === 'fullscreen') {
+          toggleFullscreen();
         } else if (button.action === 'settings') {
           previousGameState = 'playing'; // Return to playing after settings
           transitionToState('settings');
@@ -4837,6 +5161,13 @@ window.addEventListener('keydown', (e) => {
 
   // The level editor screens handle their own keys (see src/editor/)
   if (gameState === 'editor' || gameState === 'customLevels') return;
+
+  // F: fullscreen, from anywhere
+  if (e.code === 'KeyF' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    toggleFullscreen();
+    return;
+  }
 
   // Track keypresses for cheat code (only letters)
   if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) {
@@ -4967,6 +5298,8 @@ window.addEventListener('keydown', (e) => {
               loadLevel(currentLevel);
               gameState = 'playing';
             }
+          } else if (button.action === 'fullscreen') {
+            toggleFullscreen();
           } else if (button.action === 'settings') {
             previousGameState = 'playing';
             transitionToState('settings');
@@ -4982,6 +5315,8 @@ window.addEventListener('keydown', (e) => {
             if (confirm('Are you sure you want to reset all progress? This cannot be undone!')) {
               resetProgress();
             }
+          } else if (button.action === 'fullscreen') {
+            toggleFullscreen();
           }
         }
       }
@@ -5132,11 +5467,9 @@ canvas.addEventListener('click', handleClick);
 
 // Mouse move handler for hover effects
 canvas.addEventListener('mousemove', (e) => {
-  const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-  mouseX = (e.clientX - rect.left) * scaleX;
-  mouseY = (e.clientY - rect.top) * scaleY;
+  const point = canvasPointFromEvent(e);
+  mouseX = point.x;
+  mouseY = point.y;
 });
 
 // Volume slider drag handling
@@ -5146,10 +5479,10 @@ let activeSlider = null;
 canvas.addEventListener('mousedown', (e) => {
   if (gameState !== 'settings' || !window.volumeSliders) return;
   
-  const rect = canvas.getBoundingClientRect();
-  const x = (e.clientX - rect.left) * (canvas.width / rect.width);
-  const y = (e.clientY - rect.top) * (canvas.height / rect.height);
-  
+  const point = canvasPointFromEvent(e);
+  const x = point.x;
+  const y = point.y;
+
   // Check if clicking on a slider
   window.volumeSliders.forEach(slider => {
     if (x >= slider.x && x <= slider.x + slider.width &&
@@ -5171,15 +5504,13 @@ canvas.addEventListener('mousedown', (e) => {
 });
 
 canvas.addEventListener('mousemove', (e) => {
-  const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-  mouseX = (e.clientX - rect.left) * scaleX;
-  mouseY = (e.clientY - rect.top) * scaleY;
-  
+  const point = canvasPointFromEvent(e);
+  mouseX = point.x;
+  mouseY = point.y;
+
   // Handle slider dragging
   if (isDraggingSlider && activeSlider) {
-    const x = (e.clientX - rect.left) * scaleX;
+    const x = point.x;
     
     const value = Math.max(0, Math.min(1, (x - activeSlider.x) / activeSlider.width));
     if (activeSlider.type === 'master') {
