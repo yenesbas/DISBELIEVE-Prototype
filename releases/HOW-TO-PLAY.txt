@@ -1,0 +1,30 @@
+DISBELIEVE - Prototype v1.0.0
+=============================
+
+TO PLAY
+-------
+Open play.html in any modern web browser (Chrome, Firefox, Safari, Edge).
+That is the whole install. There is nothing to download, build or configure.
+
+Click the page once when it loads so the browser lets the game play audio.
+
+CONTROLS
+--------
+Move            Left / Right arrows, or A / D
+Jump            Space, or W
+Restart level   R
+Fullscreen      F
+Back to menu    ESC
+
+THE ONE RULE
+------------
+Nothing is what it looks like. Platforms lie, floors vanish, and the spikes
+are waiting for exactly the move you were about to make. Reach the green door.
+
+MAKE YOUR OWN LEVELS
+--------------------
+MY LEVELS in the main menu opens a full level editor. It unlocks once you have
+cleared every level of every chapter with a two-star average. The menu tells
+you how far off you are. Full instructions are in src/editor/EDITOR_GUIDE.md.
+
+More detail on everything: README.md and CHANGELOG.md in this folder.
