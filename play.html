@@ -7,11 +7,12 @@
     <style>
         body {
             margin: 0;
-            padding: 0;
+            padding: 8px;
             display: flex;
             justify-content: center;
             align-items: center;
             min-height: 100vh;
+            box-sizing: border-box;
             background-color: #1a1a1a;
             font-family: Arial, sans-serif;
             color: white;
@@ -20,44 +21,80 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 20px;
+            gap: 8px;
+            max-width: 100%;
+        }
+        /* The element that goes fullscreen: it holds nothing but the canvas,
+           so the text around the game stays behind in the page. */
+        #gameStage {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 0;
+            border: 2px solid #444;
         }
         canvas {
-            border: 2px solid #444;
+            display: block;
             background-color: #2a2a2a;
-            image-rendering: pixelated;
-            image-rendering: crisp-edges;
+        }
+        /* Fullscreen: black bars around the game's 5:3 shape, no border.
+           The prefixed rules are duplicated on purpose - one selector list
+           with both would be thrown away by browsers that know only one. */
+        #gameStage:fullscreen {
+            width: 100vw;
+            height: 100vh;
+            background-color: #000;
+            border: none;
+        }
+        #gameStage:-webkit-full-screen {
+            width: 100vw;
+            height: 100vh;
+            background-color: #000;
+            border: none;
+        }
+        body.fullscreen #instructions,
+        body.fullscreen #stats {
+            display: none;
         }
         #instructions {
             text-align: center;
             color: #aaa;
-        }
-        #instructions h2 {
-            margin: 0 0 10px 0;
-            color: #8c44ff;
+            font-size: 14px;
+            line-height: 1.5;
         }
         #instructions p {
-            margin: 5px 0;
+            margin: 0;
         }
+        #instructions .flavour {
+            font-size: 13px;
+            color: #7a7a86;
+        }
+        #instructions .warn { color: #ff4444; }
+        #instructions .deceive { color: #8c44ff; }
+        #instructions .door { color: #44aa66; }
+        /* One line, so the game keeps the height */
         #stats {
-            font-size: 18px;
-            color: #ff4444;
+            display: flex;
+            gap: 20px;
+            align-items: baseline;
+            font-size: 15px;
         }
+        #levelName { color: #aaa; }
+        #deathCount { color: #ff4444; }
     </style>
 </head>
 <body>
     <div id="gameContainer">
         <div id="instructions">
-            <h2>Disbelieve</h2>
-            <p><strong>← / →</strong> or <strong>A / D</strong> Move | <strong>Space</strong> or <strong>W</strong> Jump | <strong>ESC</strong> Menu</p>
-            <p style="font-size: 20px;">⚠️ <span style="color: #ff4444">DISBELIEVE</span> <span style="color: #8c44ff">what you see!</span></p>
-            <p style="color: #44ff44;">🚪 Reach the green door to complete the level!</p>
-            <p style="color: #ffcc44;">🛠 Build your own levels: beat all 3 chapters with a 2-star average to unlock <strong>MY LEVELS</strong></p>
-            <p style="color: #aaa; font-size: 14px;">Tip: Click to interact and enable audio on some browsers</p>
+            <p><strong>← / →</strong> or <strong>A / D</strong> Move | <strong>Space</strong> or <strong>W</strong> Jump | <strong>R</strong> Restart | <strong>F</strong> Fullscreen | <strong>ESC</strong> Menu</p>
+            <p class="flavour">⚠️ <span class="warn">DISBELIEVE</span> <span class="deceive">what you see</span> &middot; <span class="door">reach the green door</span> &middot; click once to enable audio</p>
         </div>
-        <canvas id="gameCanvas" width="1200" height="720"></canvas>
+        <div id="gameStage">
+            <!-- The game sizes this canvas itself; 1200x720 is its coordinate space -->
+            <canvas id="gameCanvas" width="1200" height="720"></canvas>
+        </div>
         <div id="stats">
-            <div id="levelName" style="color: #aaa; font-size: 20px; margin-bottom: 5px;">Select a level to begin</div>
+            <div id="levelName">Select a level to begin</div>
             <div id="deathCount">Deaths: 0</div>
         </div>
     </div>
