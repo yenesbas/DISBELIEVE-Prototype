@@ -25,6 +25,7 @@ Here's what awaits you in DISBELIEVE:
 - **Move:** ← / → arrows or A / D keys
 - **Jump:** Space or W key
 - **Restart Level:** R key
+- **Fullscreen:** F key (SHIFT + F in the level editor, where F paints fake blocks)
 - **Return to Menu:** ESC key
 
 ## 🛠 Build Your Own Levels
@@ -63,6 +64,8 @@ instructions: [`src/editor/EDITOR_GUIDE.md`](src/editor/EDITOR_GUIDE.md)
 - Fake platforms that look solid but aren't
 - A level editor with drag-to-tune traps, plus level sharing - unlocked by
   clearing all three chapters with a two-star average
+- Fullscreen on one key, remembered for next time - or from SETTINGS and the
+  pause menu
 - Death counter to track your attempts
 - Atmospheric sound effects and music
 - Instant respawn system
@@ -76,7 +79,9 @@ Things are not always what they seem. Trust your instincts, but be prepared to..
 
 - Pure JavaScript and HTML5 Canvas
 - No external libraries required
-- Responsive design
+- Responsive design: the game is drawn in a fixed 1200x720 space and then
+  scaled to fill the window - or the whole screen in fullscreen - rendering at
+  the display's own pixel density, so it is sharp at any size
 - Custom physics engine
 - Prototype-focused clean codebase
 

@@ -68,21 +68,38 @@ function drawCustomSessionOverlay() {
   const testing = customLevelSession.returnState === 'editor';
 
   const text = testing
-    ? 'TEST MODE  •  ESC back to editor  •  R restart'
-    : 'CUSTOM LEVEL  •  ESC menu  •  R restart';
+    ? 'TEST MODE  ·  ESC back to editor  ·  R restart'
+    : 'CUSTOM LEVEL  ·  ESC menu  ·  R restart';
 
-  ctx.font = 'bold 15px Arial, sans-serif';
-  const width = ctx.measureText(text).width + 28;
+  const accent = testing ? '#ffcc44' : '#44aaff';
+  ctx.font = 'bold 14px Arial, sans-serif';
+  const width = ctx.measureText(text).width + 40;
+  const x = GAME_WIDTH / 2 - width / 2;
 
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-  ctx.fillRect(canvas.width / 2 - width / 2, 8, width, 28);
-  ctx.strokeStyle = testing ? '#ffcc44' : '#66aaff';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(canvas.width / 2 - width / 2 + 0.5, 8.5, width - 1, 27);
+  // Rounded pill in the shared menu style, with a soft accent glow
+  if (typeof uiRoundRect === 'function') {
+    ctx.save();
+    ctx.shadowColor = accent;
+    ctx.shadowBlur = 12;
+    uiRoundRect(x, 10, width, 30, 15);
+    ctx.fillStyle = 'rgba(18, 16, 27, 0.9)';
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+  } else {
+    ctx.fillStyle = 'rgba(18, 16, 27, 0.9)';
+    ctx.fillRect(x, 10, width, 30);
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, 10.5, width - 1, 29);
+  }
 
-  ctx.fillStyle = testing ? '#ffcc44' : '#88ccff';
+  ctx.fillStyle = accent;
   ctx.textAlign = 'center';
-  ctx.fillText(text, canvas.width / 2, 27);
+  ctx.fillText(text, GAME_WIDTH / 2, 30);
   ctx.textAlign = 'left';
 }
 
@@ -142,8 +159,8 @@ function buildCustomLevelLayout() {
   }
 
   if (customLevelList.length === 0) {
-    push('createFirst', canvas.width / 2 - 170, 370, 340, 56);
-    push('importFirst', canvas.width / 2 - 110, 442, 220, 44);
+    push('createFirst', GAME_WIDTH / 2 - 170, 370, 340, 56);
+    push('importFirst', GAME_WIDTH / 2 - 110, 442, 220, 44);
   }
 
   customLevelButtons = b;
@@ -257,7 +274,7 @@ function drawCustomLevelBrowser() {
   buildCustomLevelLayout();
 
   ctx.fillStyle = '#22222c';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
   ctx.fillStyle = '#9844ff';
   ctx.font = 'bold 44px Impact, monospace';
@@ -277,9 +294,9 @@ function drawCustomLevelBrowser() {
     ctx.fillStyle = '#6f6f80';
     ctx.font = '22px Arial, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('You have not built anything yet.', canvas.width / 2, 290);
+    ctx.fillText('You have not built anything yet.', GAME_WIDTH / 2, 290);
     ctx.font = '16px Arial, sans-serif';
-    ctx.fillText('Paint platforms, drop a spike, drag its trigger - that is the whole editor.', canvas.width / 2, 322);
+    ctx.fillText('Paint platforms, drop a spike, drag its trigger - that is the whole editor.', GAME_WIDTH / 2, 322);
     ctx.textAlign = 'left';
 
     clDrawButton(byId('createFirst'), 'CREATE YOUR FIRST LEVEL', {
@@ -338,15 +355,13 @@ function drawCustomLevelBrowser() {
     ctx.fillStyle = '#aaaab8';
     ctx.font = 'bold 16px Arial, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('Page ' + (customLevelPage + 1) + ' / ' + pages, canvas.width / 2, 670);
+    ctx.fillText('Page ' + (customLevelPage + 1) + ' / ' + pages, GAME_WIDTH / 2, 670);
     ctx.textAlign = 'left';
   }
 
-  if (customLevelHint) {
-    ctx.fillStyle = '#8a8a9c';
-    ctx.font = '14px Arial, sans-serif';
-    ctx.fillText(customLevelHint, 30, 700);
-  }
+  ctx.fillStyle = '#8a8a9c';
+  ctx.font = '14px Arial, sans-serif';
+  ctx.fillText(customLevelHint || 'N  new level      F  fullscreen      ESC  menu', 30, 700);
 }
 
 function handleCustomLevelClick(x, y) {
@@ -428,6 +443,10 @@ function handleCustomLevelKey(e) {
     transitionToState('menu');
     return;
   }
+  if (e.code === 'KeyF') {
+    toggleFullscreen();
+    return;
+  }
   if (e.code === 'KeyN') {
     openEditorForNewLevel();
     return;
@@ -445,11 +464,7 @@ function handleCustomLevelKey(e) {
 // ===== EVENT WIRING (only active on the editor screens) =====
 
 function editorCanvasPoint(event) {
-  const rect = canvas.getBoundingClientRect();
-  return {
-    x: (event.clientX - rect.left) * (canvas.width / rect.width),
-    y: (event.clientY - rect.top) * (canvas.height / rect.height)
-  };
+  return canvasPointFromEvent(event); // Fixed game space, whatever size the canvas is drawn at
 }
 
 canvas.addEventListener('mousedown', (event) => {

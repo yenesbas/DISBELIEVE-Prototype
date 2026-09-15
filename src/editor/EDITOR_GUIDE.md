@@ -32,6 +32,7 @@ need, so you can see yourself getting closer.
 | ALT while dragging a handle | Turn snapping off for fine tuning |
 | TAB | Preview: hides every editor marker so you see exactly what the player sees |
 | CTRL+Z / CTRL+Y | Undo / redo |
+| SHIFT+F | Fullscreen, same as the FULL button in the bottom bar (plain F paints fake blocks) |
 | CTRL+S | Save |
 | ENTER | Test play |
 | ESC | Back (offers to save first) |
