@@ -1440,20 +1440,32 @@ function drawEditorBottomBar() {
 
 // --- help overlay ---
 function drawEditorHelpOverlay() {
-  ctx.fillStyle = 'rgba(0,0,0,0.82)';
+  ctx.fillStyle = 'rgba(8, 7, 13, 0.86)';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   const boxX = 150, boxY = 36, boxW = 900, boxH = 660;
-  ctx.fillStyle = '#1c1c26';
-  ctx.fillRect(boxX, boxY, boxW, boxH);
-  ctx.strokeStyle = '#5a5a70';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(boxX, boxY, boxW, boxH);
+  if (typeof uiCard === 'function') {
+    ctx.save();
+    ctx.shadowColor = '#8c44ff';
+    ctx.shadowBlur = 24;
+    uiCard(boxX, boxY, boxW, boxH, {
+      fill: 'rgba(18, 16, 27, 0.97)', border: '#8c44ff', lineWidth: 3, scan: true
+    });
+    ctx.restore();
+  } else {
+    ctx.fillStyle = '#12101b';
+    ctx.fillRect(boxX, boxY, boxW, boxH);
+    ctx.strokeStyle = '#8c44ff';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(boxX, boxY, boxW, boxH);
+  }
 
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = '#9844ff';
   ctx.font = 'bold 30px Impact, monospace';
   ctx.textAlign = 'center';
   ctx.fillText('LEVEL EDITOR HELP', canvas.width / 2, boxY + 40);
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.fillRect(boxX + 40, boxY + 56, boxW - 80, 1);
 
   const sections = [
     ['BUILDING', [
