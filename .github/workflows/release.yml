@@ -1,0 +1,69 @@
+# Publishes a GitHub Release whenever a version tag is pushed.
+#
+#   git tag -a v1.1.0 -m "DISBELIEVE v1.1.0"
+#   git push origin v1.1.0
+#
+# That is the whole process. This workflow rebuilds the playable zip from the
+# tagged tree, attaches it to the release, and pulls the release notes out of
+# CHANGELOG.md so there is only ever one place to write them.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the playable package
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          STAGE="$RUNNER_TEMP/DISBELIEVE-$VERSION"
+          mkdir -p "$STAGE"
+          cp play.html README.md CHANGELOG.md "$STAGE"/
+          # HOW-TO-PLAY.txt is carried inside the committed zip, not the repo,
+          # so take it from there when it exists and skip it otherwise.
+          if [ -f releases/HOW-TO-PLAY.txt ]; then
+            cp releases/HOW-TO-PLAY.txt "$STAGE"/
+          fi
+          cp -R src Sounds screenshots "$STAGE"/
+          find "$STAGE" -name '.DS_Store' -delete
+          (cd "$RUNNER_TEMP" && zip -r -q -X "DISBELIEVE-$VERSION.zip" "DISBELIEVE-$VERSION")
+          echo "ASSET=$RUNNER_TEMP/DISBELIEVE-$VERSION.zip" >> "$GITHUB_ENV"
+
+      - name: Extract this version's notes from CHANGELOG.md
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          # Everything between this version's heading and the next one.
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## \[/          { exit }
+            found && /^\[.*\]: http/   { next }   # link definitions render as nothing
+            found                       { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "No CHANGELOG entry for $VERSION - falling back to generated notes."
+            rm -f "$RUNNER_TEMP/notes.md"
+          fi
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          if [ -f "$RUNNER_TEMP/notes.md" ]; then
+            gh release create "$VERSION" "$ASSET" \
+              --title "DISBELIEVE $VERSION" \
+              --notes-file "$RUNNER_TEMP/notes.md"
+          else
+            gh release create "$VERSION" "$ASSET" \
+              --title "DISBELIEVE $VERSION" \
+              --generate-notes
+          fi

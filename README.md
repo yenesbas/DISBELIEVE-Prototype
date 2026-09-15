@@ -8,9 +8,16 @@ Welcome to DISBELIEVE, a mind-bending 2D platformer where nothing is as it seems
 
 ## 🎮 Play the Game
 
-1. Clone this repository
-2. Open `play.html` in your web browser
-3. Trust nothing, question everything!
+**Latest release: [v1.0.0](https://github.com/yenesbas/DISBELIEVE-Prototype/releases/latest)**
+- Download [`releases/DISBELIEVE-v1.0.0.zip`](releases/DISBELIEVE-v1.0.0.zip), unzip it,
+  and open `play.html` - or grab the same zip from the
+  [releases page](https://github.com/yenesbas/DISBELIEVE-Prototype/releases/latest).
+- Or clone this repository and open `play.html` directly.
+
+There is no install and no build step. Click the page once when it loads so the
+browser allows audio, then trust nothing and question everything.
+
+What is in this release: [`CHANGELOG.md`](CHANGELOG.md)
 
 ## 📸 Screenshots
 
