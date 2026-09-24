@@ -9,6 +9,282 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
+// ===== DISPLAY =====
+// The whole game is drawn in a fixed 1200x720 coordinate space, so every
+// layout number in this file (and in the editor) is written against these two
+// constants and never against the canvas element itself. The canvas is then
+// stretched to fit the window - or the entire screen in fullscreen - and its
+// backing store follows the display's pixel density, so the same drawing code
+// stays sharp at any size. See layoutDisplay() and applyDisplayTransform().
+const GAME_WIDTH = 1200;
+const GAME_HEIGHT = 720;
+
+// Used when the page around the canvas cannot be measured for some reason.
+const WINDOWED_CHROME_FALLBACK = 300;
+const WINDOWED_SIDE_MARGIN = 24;
+// Past three times the game's own resolution the extra pixels cost more than
+// they show, even on a 5K screen.
+const MAX_BACKING_SCALE = 3;
+const DISPLAY_SETTINGS_KEY = 'disbelieveDisplay';
+
+const gameStage = document.getElementById('gameStage');
+
+let fullscreenPreferred = false; // The last choice the player made, remembered
+let fullscreenRestoreDone = false;
+let fullscreenRequestPending = false; // A request is in flight (they are async)
+let fullscreenRequestTimer = null;    // Gives up on a request that never answers
+let fullscreenWasActive = false;      // Last state the game reacted to
+
+function isFullscreenActive() {
+  const el = document.fullscreenElement || document.webkitFullscreenElement;
+  return !!el && (el === gameStage || el === canvas || el.contains(canvas));
+}
+
+function fullscreenSupported() {
+  if (!gameStage) return false;
+  if (document.fullscreenEnabled === false || document.webkitFullscreenEnabled === false) return false;
+  return !!(gameStage.requestFullscreen || gameStage.webkitRequestFullscreen);
+}
+
+// How much vertical room the page needs around the canvas: the title and
+// controls above it, the death counter below it, the gaps between them and the
+// stage's own frame. Measured rather than assumed, because that text rewraps.
+function measurePageChrome() {
+  const container = gameStage && gameStage.parentElement;
+  if (!container) return WINDOWED_CHROME_FALLBACK;
+
+  let used = 0;
+  for (let i = 0; i < container.children.length; i++) {
+    const child = container.children[i];
+    if (child !== gameStage) used += child.getBoundingClientRect().height;
+  }
+
+  const containerStyle = window.getComputedStyle(container);
+  const gap = parseFloat(containerStyle.rowGap) || 0;
+  used += gap * Math.max(0, container.children.length - 1);
+
+  const bodyStyle = window.getComputedStyle(document.body);
+  used += (parseFloat(bodyStyle.paddingTop) || 0) + (parseFloat(bodyStyle.paddingBottom) || 0);
+  used += Math.max(0, gameStage.offsetHeight - canvas.offsetHeight); // the stage's border
+
+  return used;
+}
+
+// Fit the canvas into the space available, keeping the 5:3 shape: the whole
+// screen in fullscreen, otherwise the window minus the text around the game.
+function layoutDisplay() {
+  const fullscreen = isFullscreenActive();
+
+  // CSS pixels per game pixel: as large as the space allows, in a window as
+  // much as on the whole screen. Nothing is laid out in page pixels any more,
+  // so the game can be bigger than the 1200x720 it is authored at.
+  let scale = fullscreen
+    ? Math.min(window.innerWidth / GAME_WIDTH, window.innerHeight / GAME_HEIGHT)
+    : Math.min((window.innerWidth - WINDOWED_SIDE_MARGIN) / GAME_WIDTH,
+               (window.innerHeight - measurePageChrome()) / GAME_HEIGHT);
+  scale = Math.max(scale, 0.3);
+
+  const cssW = Math.round(GAME_WIDTH * scale);
+  const cssH = Math.round(GAME_HEIGHT * scale);
+  canvas.style.width = cssW + 'px';
+  canvas.style.height = cssH + 'px';
+
+  // Draw at the display's real pixel density so text and edges stay crisp
+  // instead of being upscaled from 1200x720.
+  const dpr = window.devicePixelRatio || 1;
+  const density = Math.min(scale * dpr, MAX_BACKING_SCALE);
+  const backingW = Math.round(GAME_WIDTH * density);
+  const backingH = Math.round(GAME_HEIGHT * density);
+  if (canvas.width !== backingW || canvas.height !== backingH) {
+    // Resizing clears the canvas; the next frame draws everything again.
+    canvas.width = backingW;
+    canvas.height = backingH;
+  }
+
+  // Nearest-neighbour only while the backing store lands on whole device
+  // pixels; past the density cap it would double pixels unevenly, and smooth
+  // scaling looks better than that.
+  canvas.style.imageRendering = Math.abs(backingW - cssW * dpr) < 1 ? 'pixelated' : 'auto';
+
+  document.body.classList.toggle('fullscreen', fullscreen);
+}
+
+// Browsers fire fullscreenchange before the viewport has finished resizing,
+// so the size read during the event can be the old one. Lay out again once the
+// next frames have landed.
+function relayoutSoon() {
+  requestAnimationFrame(layoutDisplay);
+  setTimeout(layoutDisplay, 150);
+}
+
+// Every frame starts here: map the fixed game space onto the backing store.
+function applyDisplayTransform() {
+  ctx.setTransform(canvas.width / GAME_WIDTH, 0, 0, canvas.height / GAME_HEIGHT, 0, 0);
+}
+
+// Turn a page position (a mouse event) into game coordinates.
+function canvasPointFromEvent(event) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (event.clientX - rect.left) * (GAME_WIDTH / rect.width),
+    y: (event.clientY - rect.top) * (GAME_HEIGHT / rect.height)
+  };
+}
+
+function loadDisplaySettings() {
+  try {
+    const saved = localStorage.getItem(DISPLAY_SETTINGS_KEY);
+    if (saved) fullscreenPreferred = !!JSON.parse(saved).fullscreen;
+  } catch (e) {
+    // A blocked localStorage just means there is no remembered preference
+  }
+}
+
+function saveDisplaySettings() {
+  try {
+    localStorage.setItem(DISPLAY_SETTINGS_KEY, JSON.stringify({ fullscreen: fullscreenPreferred }));
+  } catch (e) {
+    console.warn('Could not save display settings:', e);
+  }
+}
+
+// A one-line message for the rare case where fullscreen is refused. The menus
+// already have a notice line; the editor has its own status bar.
+function showDisplayNotice(text) {
+  if (gameState === 'editor' && typeof setEditorStatus === 'function') {
+    setEditorStatus(text, '#ffaa55');
+  } else {
+    menuNotice = text;
+    menuNoticeTimer = 4;
+  }
+  console.warn(text);
+}
+
+function enterFullscreen() {
+  if (fullscreenRequestPending || isFullscreenActive()) return;
+  if (!fullscreenSupported()) {
+    fullscreenPreferred = false;
+    saveDisplaySettings();
+    showDisplayNotice('FULLSCREEN IS NOT AVAILABLE IN THIS BROWSER');
+    return;
+  }
+  const refused = () => {
+    clearTimeout(fullscreenRequestTimer);
+    fullscreenRequestPending = false;
+    fullscreenPreferred = false;
+    saveDisplaySettings();
+    showDisplayNotice('THE BROWSER BLOCKED FULLSCREEN');
+  };
+  const request = gameStage.requestFullscreen || gameStage.webkitRequestFullscreen;
+  fullscreenRequestPending = true;
+  // Some browsers leave a refused request hanging - neither resolved nor
+  // rejected - and that must not block the next attempt for good.
+  clearTimeout(fullscreenRequestTimer);
+  fullscreenRequestTimer = setTimeout(() => { fullscreenRequestPending = false; }, 1500);
+  try {
+    const result = request.call(gameStage, { navigationUI: 'hide' });
+    if (result && result.catch) result.catch(refused);
+  } catch (e) {
+    refused();
+  }
+}
+
+function exitFullscreen() {
+  const exit = document.exitFullscreen || document.webkitExitFullscreen;
+  if (!exit) return;
+  try {
+    const result = exit.call(document);
+    if (result && result.catch) result.catch(() => {});
+  } catch (e) {
+    // Already out of fullscreen
+  }
+}
+
+// The one entry point behind the F key, the settings toggle, the pause menu
+// and the editor's FULL button.
+function toggleFullscreen() {
+  fullscreenRestoreDone = true; // The player has chosen; nothing left to restore
+  if (isFullscreenActive()) {
+    fullscreenPreferred = false;
+    saveDisplaySettings();
+    exitFullscreen();
+  } else {
+    fullscreenPreferred = true;
+    saveDisplaySettings();
+    enterFullscreen();
+  }
+}
+
+function onFullscreenChange() {
+  clearTimeout(fullscreenRequestTimer);
+  fullscreenRequestPending = false;
+  const fullscreen = isFullscreenActive();
+  fullscreenWasActive = fullscreen;
+  layoutDisplay();
+  relayoutSoon();
+
+  // Leaving through the browser's own ESC counts as a choice too
+  if (fullscreenPreferred !== fullscreen) {
+    fullscreenPreferred = fullscreen;
+    saveDisplaySettings();
+  }
+
+  // ESC is taken by the browser to leave fullscreen, so the keypress never
+  // reaches the game and the player loses the pause menu they asked for -
+  // and a level would keep running while the window resizes. Pause for them.
+  if (!fullscreen && gameState === 'playing') {
+    gameState = 'paused';
+  }
+}
+
+// Not every browser fires fullscreenchange reliably - leaving fullscreen can
+// go unannounced - so the game loop watches the state as well. Reading
+// document.fullscreenElement is cheap; it forces no layout.
+function pollFullscreenState() {
+  if (isFullscreenActive() !== fullscreenWasActive) onFullscreenChange();
+}
+
+// Browsers only allow fullscreen from a user gesture, so a preference carried
+// over from the last session waits for the player's first click or keypress.
+function restoreFullscreenOnFirstGesture() {
+  if (!fullscreenPreferred) return;
+  const tryRestore = () => {
+    if (fullscreenRestoreDone) return;
+    fullscreenRestoreDone = true;
+    if (fullscreenPreferred && !isFullscreenActive()) enterFullscreen();
+  };
+  window.addEventListener('pointerdown', tryRestore, { once: true });
+  window.addEventListener('keydown', tryRestore, { once: true });
+}
+
+function setupDisplay() {
+  loadDisplaySettings();
+  fullscreenWasActive = isFullscreenActive();
+  layoutDisplay();
+  window.addEventListener('resize', layoutDisplay);
+  window.addEventListener('orientationchange', layoutDisplay);
+  document.addEventListener('fullscreenchange', onFullscreenChange);
+  document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+  restoreFullscreenOnFirstGesture();
+}
+
+// The level name and death counter live in the page below the canvas. In
+// fullscreen there is no page, so draw them into the corner instead.
+function drawFullscreenHud() {
+  const active = getActiveLevelData();
+  ctx.save();
+  ctx.textAlign = 'right';
+  ctx.font = '15px monospace';
+  if (active && active.name) {
+    ctx.fillStyle = 'rgba(232, 228, 245, 0.5)';
+    ctx.fillText(active.name, GAME_WIDTH - 16, 26);
+  }
+  ctx.fillStyle = 'rgba(255, 120, 120, 0.65)';
+  ctx.fillText('DEATHS ' + deaths, GAME_WIDTH - 16, 46);
+  ctx.restore();
+  ctx.textAlign = 'left';
+}
+
 // Game constants
 const TILE_SIZE = 60;
 const GRAVITY = 2100 * 1.5; // Adjusted for time-based physics
@@ -17,6 +293,64 @@ const MOVE_SPEED = 380; // Adjusted for time-based physics
 const SPIKE_TRIGGER_DISTANCE = 420;
 const SPIKE_MOVE_DISTANCE = TILE_SIZE * 2;
 const COYOTE_TIME_DURATION = 0.1; // 100ms window to jump after leaving platform
+
+// ===== SPIKE TRAPS =====
+// A spike travels `digit` tiles (the character on the map) along one of these
+// unit vectors, so a diagonal trap covers exactly the same distance as a
+// straight one. 'right' is the classic behaviour and stays the default.
+const SPIKE_DIRECTIONS = {
+  right:     { dx:  1, dy:  0, arrow: '\u2192' },
+  left:      { dx: -1, dy:  0, arrow: '\u2190' },
+  up:        { dx:  0, dy: -1, arrow: '\u2191' },
+  down:      { dx:  0, dy:  1, arrow: '\u2193' },
+  upRight:   { dx:  Math.SQRT1_2, dy: -Math.SQRT1_2, arrow: '\u2197' },
+  upLeft:    { dx: -Math.SQRT1_2, dy: -Math.SQRT1_2, arrow: '\u2196' },
+  downRight: { dx:  Math.SQRT1_2, dy:  Math.SQRT1_2, arrow: '\u2198' },
+  downLeft:  { dx: -Math.SQRT1_2, dy:  Math.SQRT1_2, arrow: '\u2199' }
+};
+const SPIKE_DIRECTION_IDS = Object.keys(SPIKE_DIRECTIONS);
+const DEFAULT_SPIKE_DIRECTION = 'right';
+
+// How quickly a triggered spike covers its distance: the dash takes
+// 1 / speed seconds, so 5 is the classic 0.2s snap and 1 is a slow creep.
+const DEFAULT_SPIKE_SPEED = 5;
+const MIN_SPIKE_SPEED = 0.5;
+const MAX_SPIKE_SPEED = 20;
+
+function normalizeSpikeDirection(name) {
+  return SPIKE_DIRECTIONS[name] ? name : DEFAULT_SPIKE_DIRECTION;
+}
+
+function getSpikeDirectionVector(name) {
+  return SPIKE_DIRECTIONS[normalizeSpikeDirection(name)];
+}
+
+function normalizeSpikeSpeed(value) {
+  const speed = Number(value);
+  if (!isFinite(speed) || speed <= 0) return DEFAULT_SPIKE_SPEED;
+  return Math.max(MIN_SPIKE_SPEED, Math.min(MAX_SPIKE_SPEED, speed));
+}
+
+// Closest of the eight directions to a free vector - used by the editor when
+// the ghost block is dragged somewhere off-axis.
+function spikeDirectionFromVector(dx, dy) {
+  if (dx === 0 && dy === 0) return DEFAULT_SPIKE_DIRECTION;
+  const length = Math.sqrt(dx * dx + dy * dy);
+  const ux = dx / length;
+  const uy = dy / length;
+
+  let best = DEFAULT_SPIKE_DIRECTION;
+  let bestDot = -Infinity;
+  SPIKE_DIRECTION_IDS.forEach(id => {
+    const v = SPIKE_DIRECTIONS[id];
+    const dot = ux * v.dx + uy * v.dy;
+    if (dot > bestDot) {
+      bestDot = dot;
+      best = id;
+    }
+  });
+  return best;
+}
 
 // Crumbling platform constants (Chapter 3 mechanic)
 const CRUMBLE_DELAY = 0.6;           // Seconds player stands on it before it falls
@@ -211,6 +545,8 @@ function getCurrentLevelInfo() {
 
 // Visual Style System - Each chapter has unique rendering style
 function getCurrentVisualStyle() {
+  // Custom levels carry their own style, picked in the editor
+  if (customLevelSession) return customLevelSession.chapter.visualStyle || 'default';
   const chapterInfo = getCurrentChapterInfo();
   return chapterInfo?.visualStyle || 'default';
 }
@@ -236,8 +572,24 @@ function updateSketchWobble(deltaTime) {
   sketchWobble += deltaTime * 2;
 }
 
+// ===== CUSTOM LEVELS (LEVEL EDITOR) =====
+// While the player is testing or playing one of their own levels the engine
+// reads the level from here instead of the built-in chapters.
+// Defined in src/editor/ - see custom_levels.js.
+let customLevelSession = null;
+
+// The level the engine should currently run (built-in level, or custom one)
+function getActiveLevelData() {
+  return customLevelSession ? customLevelSession.data : levels[currentLevel];
+}
+
+// The chapter that level belongs to (custom levels get a stand-in chapter)
+function getActiveChapterData() {
+  return customLevelSession ? customLevelSession.chapter : chapters[currentChapter];
+}
+
 // Game state
-let gameState = 'menu'; // 'menu', 'settings', 'chapterSelect', 'levelSelect', 'playing', 'levelComplete', 'paused'
+let gameState = 'menu'; // 'menu', 'settings', 'chapterSelect', 'levelSelect', 'playing', 'levelComplete', 'paused', 'customLevels', 'editor'
 let previousGameState = null; // Store previous state to return to after settings
 let currentChapter = 0;
 let currentLevel = 0;
@@ -405,6 +757,73 @@ function isTrailUnlocked(trail) {
   return isChapterCompleted(trail.unlockChapter);
 }
 
+// ===== LEVEL EDITOR UNLOCK =====
+// The editor is earned, not given: every story level has to be finished AND
+// the player needs a two-star average across all of them. With three full
+// chapters that is 30 levels and 60 of the 90 possible stars.
+const EDITOR_UNLOCK_STAR_AVERAGE = 2;
+
+function getStoryLevelTotal() {
+  // Bonus levels are optional, so they never count towards the unlock
+  return chapters.reduce((total, chapter) => total + chapter.levels.length, 0);
+}
+
+// Everything the menu needs to show how close the player is
+function getEditorUnlockProgress() {
+  const totalLevels = getStoryLevelTotal();
+  let completed = 0;
+  let stars = 0;
+
+  chapters.forEach((chapter, chapterIndex) => {
+    for (let i = 0; i < chapter.levels.length; i++) {
+      const globalIndex = getGlobalLevelIndex(chapterIndex, i);
+      if (completedLevels.has(globalIndex)) completed++;
+      stars += levelStars[globalIndex] || 0;
+    }
+  });
+
+  const requiredStars = totalLevels * EDITOR_UNLOCK_STAR_AVERAGE;
+  return {
+    totalLevels: totalLevels,
+    completed: completed,
+    stars: stars,
+    requiredStars: requiredStars,
+    maxStars: totalLevels * 3,
+    levelsLeft: Math.max(0, totalLevels - completed),
+    starsLeft: Math.max(0, requiredStars - stars),
+    unlocked: completed >= totalLevels && stars >= requiredStars
+  };
+}
+
+function isLevelEditorUnlocked() {
+  if (DEVELOPER_MODE) return true; // Developer mode unlocks everything
+  return getEditorUnlockProgress().unlocked;
+}
+
+// The unlock requirement in one line, for the menu's info panel
+function getEditorUnlockHint() {
+  const progress = getEditorUnlockProgress();
+  if (progress.unlocked) return '';
+  return 'Finish all ' + progress.totalLevels + ' levels with ' +
+         progress.requiredStars + '\u2605 to unlock.';
+}
+
+// Menu notice shown when a locked option is clicked
+let menuNotice = '';
+let menuNoticeTimer = 0;
+
+// Single entry point for the MY LEVELS button, from mouse and keyboard alike
+function tryOpenLevelEditor() {
+  if (!isLevelEditorUnlocked()) {
+    const progress = getEditorUnlockProgress();
+    menuNotice = 'LOCKED - you have ' + progress.completed + '/' + progress.totalLevels +
+                 ' levels and ' + progress.stars + '/' + progress.requiredStars + ' \u2605 needed';
+    menuNoticeTimer = 4;
+    return;
+  }
+  openCustomLevelBrowser();
+}
+
 function getBonusLevelGlobalIndex(chapterIndex) {
   // Calculate global index for bonus level
   // Bonus levels are placed after regular levels: chapter levels + previous bonus levels
@@ -518,6 +937,7 @@ function resumeGame() {
 // Initialize game
 function init() {
   loadProgress(); // Load saved progress
+  setupDisplay(); // Size the canvas to the window / screen (see DISPLAY above)
   setupAudioControls();
   // Attempt to enable audio when the user interacts (click or key) to satisfy browser autoplay policies
   document.addEventListener('click', tryEnableAudio, { once: true });
@@ -554,6 +974,7 @@ function init() {
 
 // Load a specific level by chapter and level within chapter
 function loadLevelFromChapter(chapterIndex, levelInChapter) {
+  customLevelSession = null; // Built-in level: leave any custom level behind
   currentChapter = chapterIndex;
   currentLevelInChapter = levelInChapter;
   currentLevel = getGlobalLevelIndex(chapterIndex, levelInChapter);
@@ -566,6 +987,7 @@ function loadLevelFromChapter(chapterIndex, levelInChapter) {
 
 // Load a specific level by global index (for backwards compatibility)
 function loadLevel(globalLevelIndex) {
+  customLevelSession = null; // Built-in level: leave any custom level behind
   currentLevel = globalLevelIndex;
   currentChapter = getChapterFromGlobalLevel(globalLevelIndex);
   currentLevelInChapter = getLevelInChapterFromGlobalLevel(globalLevelIndex);
@@ -586,9 +1008,13 @@ function parseLevel() {
   door = null;
   spawnPoint = null; // Reset custom spawn point for each level
 
-  const levelMap = levels[currentLevel].map;
-  const customTriggers = levels[currentLevel].spikeTriggers || []; // Get custom triggers if defined
-  const customTriggerLengths = levels[currentLevel].spikeTriggerLengths || []; // Get custom trigger lengths
+  const activeLevel = getActiveLevelData();
+  const levelMap = activeLevel.map;
+  const customTriggers = activeLevel.spikeTriggers || []; // Get custom triggers if defined
+  const customTriggerLengths = activeLevel.spikeTriggerLengths || []; // Get custom trigger lengths
+  const customTriggerAreas = activeLevel.spikeTriggerAreas || []; // Free-form trigger rectangles
+  const customDirections = activeLevel.spikeDirections || []; // Which way each spike shoots
+  const customSpeeds = activeLevel.spikeSpeeds || []; // How fast each spike shoots
   const defaultTriggerOffset = -0.5; // Changed from 2 to -0.5 - spikes trigger when player crosses them
 
   let spikeIndex = 0; // Track which spike we're on for custom triggers
@@ -617,36 +1043,50 @@ function parseLevel() {
         });
       } else if (/^[0-9]$/.test(char) || char === '^') {
         // Handle spikes with movement distances 0-9 or backward compatibility '^'
-        let moveDistance;
-        if (char === '^') {
-          moveDistance = TILE_SIZE * 2; // backward compatibility
+        const moveTiles = char === '^' ? 2 : parseInt(char, 10);
+        const moveDistance = TILE_SIZE * moveTiles;
+
+        // Which way it shoots, and how fast it covers that distance
+        const direction = normalizeSpikeDirection(customDirections[spikeIndex]);
+        const vector = getSpikeDirectionVector(direction);
+        const moveSpeed = normalizeSpikeSpeed(customSpeeds[spikeIndex]);
+
+        const spikeTopY = y + 20; // Spike's actual visual y position (top)
+
+        // The trigger: an explicit rectangle wins when the level defines one,
+        // otherwise the classic vertical line built from spikeTriggers /
+        // spikeTriggerLengths. Areas are stored relative to the spike's tile,
+        // so a trap keeps its shape when the spike is moved in the editor.
+        const area = customTriggerAreas[spikeIndex];
+        let triggerX, triggerY, triggerWidth, triggerHeight;
+        let triggerOffset, triggerLength;
+
+        if (area && typeof area === 'object') {
+          triggerX = x + (Number(area.x) || 0);
+          triggerY = y + (Number(area.y) || 0);
+          triggerWidth = Math.max(0, Number(area.w) || 0);
+          triggerHeight = Math.max(0, Number(area.h) || 0);
+          triggerOffset = (x - triggerX) / TILE_SIZE; // debug display only
+          triggerLength = null;
         } else {
-          moveDistance = TILE_SIZE * parseInt(char, 10);
-        }
+          // Determine trigger position (vertical line to the left of spike)
+          triggerOffset = customTriggers[spikeIndex] !== undefined
+            ? customTriggers[spikeIndex]
+            : defaultTriggerOffset;
 
-        // Determine trigger position (vertical line to the left of spike)
-        const triggerOffset = customTriggers[spikeIndex] !== undefined
-          ? customTriggers[spikeIndex]
-          : defaultTriggerOffset;
+          triggerX = x - (triggerOffset * TILE_SIZE); // Position of vertical trigger line
+          triggerWidth = 0; // A bare line: the player only has to cross it
 
-        const triggerX = x - (triggerOffset * TILE_SIZE); // Position of vertical trigger line
+          // Determine trigger length (vertical span)
+          triggerLength = customTriggerLengths[spikeIndex] !== undefined && customTriggerLengths[spikeIndex] !== null
+            ? customTriggerLengths[spikeIndex]
+            : null; // null means full-height
 
-        // Determine trigger length (vertical span)
-        const triggerLength = customTriggerLengths[spikeIndex] !== undefined && customTriggerLengths[spikeIndex] !== null
-          ? customTriggerLengths[spikeIndex]
-          : null; // null means full-height
-
-        // Calculate trigger vertical bounds
-        let triggerY, triggerHeight;
-        if (triggerLength === null || triggerLength === 0) {
-          // Full-height trigger (default behavior)
-          triggerY = 0;
-          triggerHeight = canvas.height;
-        } else {
-          // Limited-height trigger from spike top
-          const spikeTopY = y + 20; // Spike's actual visual y position (top)
-
-          if (triggerLength > 0) {
+          if (triggerLength === null || triggerLength === 0) {
+            // Full-height trigger (default behavior)
+            triggerY = 0;
+            triggerHeight = GAME_HEIGHT;
+          } else if (triggerLength > 0) {
             // POSITIVE: extends UPWARD from spike top
             triggerY = spikeTopY - triggerLength;
             triggerHeight = triggerLength;
@@ -659,13 +1099,19 @@ function parseLevel() {
 
         spikes.push({
           x: x,
-          y: y + 20,
+          y: spikeTopY,
           originalX: x,
+          originalY: spikeTopY,
           width: TILE_SIZE,
           height: TILE_SIZE - 20, // Slightly shorter spike
           moveDistance: moveDistance, // Custom movement distance per spike
-          triggerX: triggerX, // X position where trigger line is located
-          triggerY: triggerY, // Y position where trigger line starts
+          moveX: vector.dx * moveDistance, // Travel along X once triggered
+          moveY: vector.dy * moveDistance, // Travel along Y once triggered
+          direction: direction, // One of SPIKE_DIRECTIONS
+          moveSpeed: moveSpeed, // Dash takes 1 / moveSpeed seconds
+          triggerX: triggerX, // X position where the trigger starts
+          triggerY: triggerY, // Y position where the trigger starts
+          triggerWidth: triggerWidth, // Width of the trigger (0 = a bare line)
           triggerHeight: triggerHeight, // Height of trigger line
           triggerOffset: triggerOffset, // How many tiles left (for debug display)
           triggerLength: triggerLength, // Length in pixels (null = full height)
@@ -688,8 +1134,8 @@ function parseLevel() {
   // Parse gravity zones if feature is enabled
   if (ENABLE_GRAVITY_ZONES) {
     gravityZones = [];
-    const levelData = levels[currentLevel];
-    const chapterData = chapters[currentChapter];
+    const levelData = getActiveLevelData();
+    const chapterData = getActiveChapterData() || {};
     
     // First, detect 'G' and 'g' markers in the map to find zone boundaries
     const zoneMarkers = [];
@@ -823,6 +1269,7 @@ function resetPlayer() {
   // Reset all spikes
   spikes.forEach(spike => {
     spike.x = spike.originalX;
+    spike.y = spike.originalY;
     spike.triggered = false;
     spike.moved = false;
     spike.moving = false;
@@ -844,7 +1291,14 @@ function resetPlayer() {
 // Update game state
 function update(deltaTime) {
   // Visual effects are now static - no animation updates needed
-  
+
+  // Fade out the "still locked" note on the main menu
+  if (menuNoticeTimer > 0) menuNoticeTimer = Math.max(0, menuNoticeTimer - deltaTime);
+
+  // Menu-style screens animate continuously, including while fading in or out
+  if (UI_SCREENS.indexOf(gameState) !== -1) updateUiAnimation(gameState, deltaTime);
+  else uiScreenKey = null;
+
   // Handle transitions
   if (transitionState === 'fadeOut') {
     transitionAlpha += transitionSpeed * deltaTime;
@@ -853,6 +1307,8 @@ function update(deltaTime) {
       transitionState = 'fadeIn';
       gameState = pendingGameState;
       pendingGameState = null;
+      // Let the editor screens clean up / refresh when they are entered
+      if (typeof onGameStateEntered === 'function') onGameStateEntered(gameState);
     }
     return; // Don't update game during transition
   } else if (transitionState === 'fadeIn') {
@@ -884,6 +1340,12 @@ function update(deltaTime) {
     return;
   }
 
+  // Level editor screens (My Levels browser + the editor itself)
+  if (gameState === 'customLevels' || gameState === 'editor') {
+    if (typeof updateEditor === 'function') updateEditor(deltaTime);
+    return;
+  }
+
   // Paused state
   if (gameState === 'paused') {
     return;
@@ -892,6 +1354,13 @@ function update(deltaTime) {
   // Level complete state
   if (gameState === 'levelComplete') {
     levelCompleteTimer -= deltaTime;
+
+    // A custom level goes back to wherever it was started from
+    if (customLevelSession) {
+      if (levelCompleteTimer <= 0) endCustomLevelSession();
+      return;
+    }
+
     if (levelCompleteTimer <= 0) {
       // Check if there are more levels in current chapter
       if (currentLevelInChapter < chapters[currentChapter].levels.length - 1) {
@@ -1046,8 +1515,8 @@ function update(deltaTime) {
 
   // Keep player in bounds horizontally
   if (player.x < 0) player.x = 0;
-  if (player.x + player.width > canvas.width) {
-    player.x = canvas.width - player.width;
+  if (player.x + player.width > GAME_WIDTH) {
+    player.x = GAME_WIDTH - player.width;
   }
 
   // Horizontal collision check
@@ -1230,16 +1699,17 @@ function update(deltaTime) {
   // Update moving spikes
   spikes.forEach(spike => {
     if (spike.moving) {
-      spike.moveTimer += deltaTime * 5;
+      // The dash takes 1 / moveSpeed seconds, whatever the distance
+      spike.moveTimer += deltaTime * spike.moveSpeed;
       if (spike.moveTimer >= 1) {
         spike.moveTimer = 1;
         spike.moving = false;
         spike.moved = true;
       }
 
-      // Interpolate position using spike's custom moveDistance
-      const targetX = spike.originalX + spike.moveDistance;
-      spike.x = spike.originalX + (targetX - spike.originalX) * spike.moveTimer;
+      // Interpolate along the spike's own travel vector (any of 8 directions)
+      spike.x = spike.originalX + spike.moveX * spike.moveTimer;
+      spike.y = spike.originalY + spike.moveY * spike.moveTimer;
     }
   });
 
@@ -1256,7 +1726,7 @@ function update(deltaTime) {
   }
 
   // Fall off screen = death
-  if (player.y > canvas.height + 100) {
+  if (player.y > GAME_HEIGHT + 100) {
     die();
   }
   
@@ -1287,7 +1757,17 @@ function update(deltaTime) {
 function completeLevel() {
   gameState = 'levelComplete';
   levelCompleteTimer = LEVEL_COMPLETE_DURATION;
-  
+
+  // Custom levels have their own records and never touch chapter progress
+  if (customLevelSession) {
+    if (customLevelSession.id && customLevelSession.returnState !== 'editor') {
+      recordCustomLevelWin(customLevelSession.id, levelDeaths, levelTime);
+    }
+    tryEnableAudio();
+    playSound('level_end');
+    return;
+  }
+
   // Mark this level as completed
   markLevelComplete(currentLevel);
   
@@ -1318,11 +1798,14 @@ function checkSpikeTriggers() {
       // Check if player is within the vertical bounds of the trigger
       const withinVerticalBounds = (playerBottom >= spike.triggerY) && (playerTop <= spike.triggerY + spike.triggerHeight);
 
-      // Check if player is currently crossing through the trigger line (left edge before line, right edge after line)
-      const currentlyCrossingLine = (playerLeftEdge < spike.triggerX) && (playerRightEdge >= spike.triggerX);
+      // A trigger with a width is a box the player has to touch; a trigger
+      // without one is the classic line the player has to cross.
+      const withinHorizontalBounds = spike.triggerWidth > 0
+        ? (playerRightEdge >= spike.triggerX) && (playerLeftEdge <= spike.triggerX + spike.triggerWidth)
+        : (playerLeftEdge < spike.triggerX) && (playerRightEdge >= spike.triggerX);
 
-      // Trigger when player actively crosses through the line AND is within vertical bounds
-      if (currentlyCrossingLine && withinVerticalBounds) {
+      // Trigger when the player is inside the trigger on both axes
+      if (withinHorizontalBounds && withinVerticalBounds) {
         spike.triggered = true;
         spike.moving = true;
         spike.moveTimer = 0;
@@ -1459,7 +1942,8 @@ function die() {
 function updateStats() {
   document.getElementById('deathCount').textContent = `Deaths: ${deaths}`;
   if (gameState === 'playing' || gameState === 'levelComplete') {
-    document.getElementById('levelName').textContent = levels[currentLevel].name;
+    const activeLevel = getActiveLevelData();
+    document.getElementById('levelName').textContent = activeLevel ? activeLevel.name : '';
   }
 }
 
@@ -1484,25 +1968,25 @@ function drawStyledBackground(style) {
   switch(style) {
     case 'neon':
       // Neon glow - dark background with gradient
-      const neonGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      const neonGradient = ctx.createLinearGradient(0, 0, 0, GAME_HEIGHT);
       neonGradient.addColorStop(0, '#0a0a1a');
       neonGradient.addColorStop(1, '#1a0a2a');
       ctx.fillStyle = neonGradient;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
       
       // Add subtle grid
       ctx.strokeStyle = 'rgba(100, 100, 255, 0.1)';
       ctx.lineWidth = 1;
-      for (let x = 0; x < canvas.width; x += 40) {
+      for (let x = 0; x < GAME_WIDTH; x += 40) {
         ctx.beginPath();
         ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvas.height);
+        ctx.lineTo(x, GAME_HEIGHT);
         ctx.stroke();
       }
-      for (let y = 0; y < canvas.height; y += 40) {
+      for (let y = 0; y < GAME_HEIGHT; y += 40) {
         ctx.beginPath();
         ctx.moveTo(0, y);
-        ctx.lineTo(canvas.width, y);
+        ctx.lineTo(GAME_WIDTH, y);
         ctx.stroke();
       }
       break;
@@ -1510,14 +1994,14 @@ function drawStyledBackground(style) {
     case 'sketch':
       // Hand-drawn paper texture (static)
       ctx.fillStyle = '#f5f5dc'; // Beige paper color
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
       
       // Add paper texture (static pattern)
       ctx.fillStyle = 'rgba(0, 0, 0, 0.03)';
       // Use deterministic pattern instead of random
       for (let i = 0; i < 200; i++) {
-        const x = (i * 37) % canvas.width;
-        const y = (i * 53) % canvas.height;
+        const x = (i * 37) % GAME_WIDTH;
+        const y = (i * 53) % GAME_HEIGHT;
         ctx.fillRect(x, y, 2, 2);
       }
       break;
@@ -1525,16 +2009,16 @@ function drawStyledBackground(style) {
     case 'glitch':
       // Digital corruption
       ctx.fillStyle = '#000000';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
       
       // Random scan lines
       ctx.strokeStyle = 'rgba(0, 255, 100, 0.1)';
       ctx.lineWidth = 1;
-      for (let y = 0; y < canvas.height; y += 4) {
+      for (let y = 0; y < GAME_HEIGHT; y += 4) {
         if (Math.random() > 0.5) {
           ctx.beginPath();
           ctx.moveTo(0, y);
-          ctx.lineTo(canvas.width, y);
+          ctx.lineTo(GAME_WIDTH, y);
           ctx.stroke();
         }
       }
@@ -1543,19 +2027,19 @@ function drawStyledBackground(style) {
     case 'surreal':
       // Abstract/surreal - static gradient colors
       const surrealGradient = ctx.createRadialGradient(
-        canvas.width/2, canvas.height/2, 0,
-        canvas.width/2, canvas.height/2, canvas.width
+        GAME_WIDTH/2, GAME_HEIGHT/2, 0,
+        GAME_WIDTH/2, GAME_HEIGHT/2, GAME_WIDTH
       );
       surrealGradient.addColorStop(0, 'hsl(240, 40%, 15%)');
       surrealGradient.addColorStop(1, 'hsl(280, 40%, 10%)');
       ctx.fillStyle = surrealGradient;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
       break;
       
     default:
       // Default minimalist style
       ctx.fillStyle = DEVELOPER_MODE ? '#1a1a3a' : '#2a2a2a';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
   }
 }
 
@@ -1968,7 +2452,8 @@ function updateTriggerInfo() {
   let infoText = 'Spike Triggers: ';
   spikes.forEach((spike, index) => {
     const status = spike.moved ? '✓' : (spike.triggered ? '→' : '○');
-    infoText += `[${index + 1}: -${spike.triggerOffset} tiles ${status}] `;
+    const arrow = getSpikeDirectionVector(spike.direction).arrow;
+    infoText += `[${index + 1}: ${arrow}${spike.moveDistance / TILE_SIZE} @x${spike.moveSpeed} ${status}] `;
   });
 
   triggerInfoElement.textContent = infoText;
@@ -2464,6 +2949,9 @@ function drawStyledGravityZone(zone, isActive, style) {
 
 // Render game
 function render() {
+  // The canvas may have been resized for the window or for fullscreen
+  applyDisplayTransform();
+
   // Get current visual style
   const visualStyle = (gameState === 'playing' || gameState === 'paused' || gameState === 'levelComplete') 
     ? getCurrentVisualStyle() 
@@ -2503,6 +2991,20 @@ function render() {
   // Level selection screen
   if (gameState === 'levelSelect') {
     drawLevelSelect();
+    renderTransition();
+    return;
+  }
+
+  // My Levels browser
+  if (gameState === 'customLevels') {
+    drawCustomLevelBrowser();
+    renderTransition();
+    return;
+  }
+
+  // Level editor
+  if (gameState === 'editor') {
+    drawEditor();
     renderTransition();
     return;
   }
@@ -2575,24 +3077,37 @@ function render() {
       ctx.strokeStyle = 'rgba(255, 255, 0, 0.3)'; // Yellow, transparent
       ctx.lineWidth = 2;
       ctx.setLineDash([5, 5]); // Dashed line
-      ctx.beginPath();
-      ctx.moveTo(spike.triggerX, spike.triggerY);
-      ctx.lineTo(spike.triggerX, spike.triggerY + spike.triggerHeight);
-      ctx.stroke();
+
+      if (spike.triggerWidth > 0) {
+        // Free-form trigger box
+        ctx.fillStyle = 'rgba(255, 255, 0, 0.08)';
+        ctx.fillRect(spike.triggerX, spike.triggerY, spike.triggerWidth, spike.triggerHeight);
+        ctx.strokeRect(spike.triggerX, spike.triggerY, spike.triggerWidth, spike.triggerHeight);
+      } else {
+        // Classic trigger line
+        ctx.beginPath();
+        ctx.moveTo(spike.triggerX, spike.triggerY);
+        ctx.lineTo(spike.triggerX, spike.triggerY + spike.triggerHeight);
+        ctx.stroke();
+      }
       ctx.setLineDash([]); // Reset to solid line
 
-      // Draw small label showing trigger offset and length
+      // Draw small label showing the trap's shape, direction and speed
       ctx.fillStyle = 'rgba(255, 255, 0, 0.6)';
       ctx.font = '12px monospace';
-      let lengthLabel;
-      if (spike.triggerLength === null || spike.triggerLength === 0) {
-        lengthLabel = 'full';
+      let shapeLabel;
+      if (spike.triggerWidth > 0) {
+        shapeLabel = `${Math.round(spike.triggerWidth)}x${Math.round(spike.triggerHeight)}px`;
+      } else if (spike.triggerLength === null || spike.triggerLength === 0) {
+        shapeLabel = 'full';
       } else if (spike.triggerLength > 0) {
-        lengthLabel = `↑${spike.triggerLength}px`;
+        shapeLabel = `↑${spike.triggerLength}px`;
       } else {
-        lengthLabel = `↓${Math.abs(spike.triggerLength)}px`;
+        shapeLabel = `↓${Math.abs(spike.triggerLength)}px`;
       }
-      ctx.fillText(`-${spike.triggerOffset} [${lengthLabel}]`, spike.triggerX - 15, spike.y - 5);
+      const arrow = getSpikeDirectionVector(spike.direction).arrow;
+      ctx.fillText(`${arrow}${spike.moveDistance / TILE_SIZE} [${shapeLabel}] x${spike.moveSpeed}`,
+        spike.triggerX - 15, spike.y - 5);
     }
 
     // Draw spike with visual style
@@ -2636,7 +3151,7 @@ function render() {
       ctx.fillStyle = color;
       ctx.font = 'bold 24px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(text, canvas.width / 2, 50);
+      ctx.fillText(text, GAME_WIDTH / 2, 50);
       ctx.restore();
     }
   }
@@ -2644,7 +3159,7 @@ function render() {
   // Death flash
   if (isDead && deathFlashTimer > 0 && gameState === 'playing') {
     ctx.fillStyle = `rgba(255, 0, 0, ${deathFlashTimer / DEATH_FLASH_DURATION * 0.5})`;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
     // Draw "X_X" face (scaled)
     ctx.fillStyle = '#ff0000';
@@ -2652,195 +3167,31 @@ function render() {
     ctx.fillText('X_X', player.x - 8, player.y + 30);
   }
 
-  // Level complete overlay
+  // Level complete window
   if (gameState === 'levelComplete') {
-    // Semi-transparent green overlay
-    ctx.fillStyle = 'rgba(0, 255, 0, 0.3)';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Main celebration box
-    const boxWidth = 500;
-    const boxHeight = 380;
-    const boxX = canvas.width / 2 - boxWidth / 2;
-    const boxY = canvas.height / 2 - boxHeight / 2;
-    
-    // Box background
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
-    ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
-    
-    // Box border
-    ctx.strokeStyle = '#44ff44';
-    ctx.lineWidth = 4;
-    ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
-
-    // Title
-    ctx.fillStyle = '#44ff44';
-    ctx.font = 'bold 48px Impact, monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('LEVEL COMPLETE!', canvas.width / 2, boxY + 60);
-    
-    // Star rating with animation effect
-    const stars = calculateStars(levelDeaths);
-    const starDisplay = '★'.repeat(stars) + '☆'.repeat(3 - stars);
-    ctx.fillStyle = '#ffdd44';
-    ctx.font = 'bold 64px monospace';
-    ctx.fillText(starDisplay, canvas.width / 2, boxY + 140);
-    
-    // Stats section
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '20px Arial, sans-serif';
-    ctx.textAlign = 'left';
-    
-    const statsX = boxX + 80;
-    let statsY = boxY + 200;
-    
-    // Time
-    ctx.fillStyle = '#88ddff';
-    ctx.fillText('Time:', statsX, statsY);
-    ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'right';
-    ctx.fillText(`${Math.floor(levelTime / 60)}:${(Math.floor(levelTime % 60)).toString().padStart(2, '0')}`, boxX + boxWidth - 80, statsY);
-    
-    // Deaths
-    statsY += 40;
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#ff8888';
-    ctx.fillText('Deaths:', statsX, statsY);
-    ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'right';
-    ctx.fillText(`${levelDeaths}`, boxX + boxWidth - 80, statsY);
-    
-    // Star rating text
-    statsY += 40;
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#ffdd44';
-    ctx.fillText('Rating:', statsX, statsY);
-    ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'right';
-    ctx.fillText(`${stars} / 3 Stars`, boxX + boxWidth - 80, statsY);
-    
-    // Motivational message based on performance
-    ctx.textAlign = 'center';
-    ctx.font = '18px Arial, sans-serif';
-    statsY += 50;
-    
-    if (stars === 3) {
-      ctx.fillStyle = '#44ff44';
-      ctx.fillText('PERFECT! No deaths!', canvas.width / 2, statsY);
-    } else if (stars === 2) {
-      ctx.fillStyle = '#ffff44';
-      ctx.fillText('Great job! Keep improving!', canvas.width / 2, statsY);
-    } else if (stars === 1) {
-      ctx.fillStyle = '#ff8844';
-      ctx.fillText('Good effort! Try again for more stars!', canvas.width / 2, statsY);
-    } else {
-      ctx.fillStyle = '#ff4444';
-      ctx.fillText('Keep practicing! You can do better!', canvas.width / 2, statsY);
-    }
-
-    // Next level message
-    ctx.font = '20px Arial, sans-serif';
-    ctx.fillStyle = '#aaaaaa';
-    if (currentLevel < levels.length - 1) {
-      ctx.fillText('Next level loading...', canvas.width / 2, boxY + boxHeight - 30);
-    } else {
-      ctx.fillText('You beat all levels!', canvas.width / 2, boxY + boxHeight - 50);
-      ctx.fillText(`Total Deaths: ${deaths}`, canvas.width / 2, boxY + boxHeight - 25);
-    }
-    ctx.textAlign = 'left';
+    drawLevelCompletePopup();
   }
 
   // Update trigger info display below canvas
   updateTriggerInfo();
   
-  // Draw unlock notification screen (after chapter complete)
+  // Chapter-complete unlock window
   if (gameState === 'unlockNotification') {
-    // Dark overlay
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
-    // Main notification box
-    const boxWidth = 600;
-    const boxHeight = 400;
-    const boxX = canvas.width / 2 - boxWidth / 2;
-    const boxY = canvas.height / 2 - boxHeight / 2;
-    
-    // Box background with gradient
-    const gradient = ctx.createLinearGradient(boxX, boxY, boxX, boxY + boxHeight);
-    gradient.addColorStop(0, '#2a2a4a');
-    gradient.addColorStop(1, '#1a1a2a');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
-    
-    // Box border with glow effect
-    ctx.shadowColor = '#8c44ff';
-    ctx.shadowBlur = 20;
-    ctx.strokeStyle = '#8c44ff';
-    ctx.lineWidth = 4;
-    ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
-    ctx.shadowBlur = 0;
-    
-    // Title
-    ctx.fillStyle = '#ffdd44';
-    ctx.font = 'bold 48px Impact, monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('🎉 NEW UNLOCKS! 🎉', canvas.width / 2, boxY + 70);
-    
-    // Subtitle
-    ctx.fillStyle = '#aaaaaa';
-    ctx.font = '22px Arial, sans-serif';
-    ctx.fillText('Chapter Complete! You earned:', canvas.width / 2, boxY + 110);
-    
-    // Display unlocked items
-    let itemY = boxY + 160;
-    unlockedItems.forEach(item => {
-      if (item.type === 'color') {
-        // Color unlock
-        ctx.fillStyle = item.value;
-        ctx.beginPath();
-        ctx.arc(canvas.width / 2 - 150, itemY + 10, 25, 0, Math.PI * 2);
-        ctx.fill();
-        
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 28px Arial, sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText(`${item.name} Color`, canvas.width / 2 - 110, itemY + 18);
-        
-        ctx.fillStyle = '#888888';
-        ctx.font = '18px Arial, sans-serif';
-        ctx.fillText('Available in Customization', canvas.width / 2 - 110, itemY + 45);
-      } else if (item.type === 'trail') {
-        // Trail unlock
-        ctx.fillStyle = '#8c44ff';
-        ctx.font = 'bold 32px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText('✨', canvas.width / 2 - 150, itemY + 18);
-        
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 28px Arial, sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText(`${item.name} Trail`, canvas.width / 2 - 110, itemY + 18);
-        
-        ctx.fillStyle = '#888888';
-        ctx.font = '18px Arial, sans-serif';
-        ctx.fillText('Available in Customization', canvas.width / 2 - 110, itemY + 45);
-      }
-      
-      itemY += 80;
-    });
-    
-    // Continue message
-    ctx.fillStyle = '#44ff44';
-    ctx.font = '24px Arial, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Press SPACE or ENTER to continue', canvas.width / 2, boxY + boxHeight - 40);
-    
-    ctx.textAlign = 'left';
+    drawUnlockPopup();
   }
-  
+
+  // Banner while playing / testing a player-made level
+  if (customLevelSession && gameState === 'playing' && typeof drawCustomSessionOverlay === 'function') {
+    drawCustomSessionOverlay();
+  }
+
+  // In fullscreen the page's level name and death counter are off screen
+  if (isFullscreenActive() && (gameState === 'playing' || gameState === 'levelComplete')) {
+    drawFullscreenHud();
+  }
+
   // Draw pause menu overlay if paused (must be after game is drawn)
   if (gameState === 'paused') {
-    console.log('Drawing pause menu!'); // DEBUG
     drawPauseMenu();
   }
   
@@ -2852,193 +3203,1024 @@ function render() {
 function renderTransition() {
   if (transitionState !== 'none' && transitionAlpha > 0) {
     ctx.fillStyle = `rgba(0, 0, 0, ${transitionAlpha})`;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
   }
+}
+
+// A popup window: dimmed game behind, rounded card in front, both fading in.
+// Returns the card box so the caller can lay content out inside it.
+function uiPopup(w, h, accent, dim) {
+  const intro = easeOutCubic(clamp01(screenIntro / 0.28));
+
+  ctx.fillStyle = 'rgba(8, 7, 13, ' + (0.82 * intro).toFixed(3) + ')';
+  ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+  if (dim) {
+    ctx.fillStyle = dim;
+    ctx.globalAlpha = intro;
+    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    ctx.globalAlpha = 1;
+  }
+
+  const x = GAME_WIDTH / 2 - w / 2;
+  const y = GAME_HEIGHT / 2 - h / 2;
+
+  ctx.save();
+  ctx.globalAlpha = intro;
+  ctx.translate(0, (1 - intro) * 18);
+  ctx.shadowColor = accent;
+  ctx.shadowBlur = 26;
+  uiCard(x, y, w, h, { fill: 'rgba(18, 16, 27, 0.97)', border: accent, lineWidth: 3, scan: true });
+  ctx.shadowBlur = 0;
+  return { x: x, y: y, w: w, h: h, intro: intro };
+}
+
+// Label left, value right - the row shape used across the popups
+function uiPopupRow(box, y, label, value, labelColor) {
+  const pad = 54;
+  ctx.textAlign = 'left';
+  ctx.font = '15px Arial, sans-serif';
+  ctx.fillStyle = labelColor || '#8a84a0';
+  ctx.fillText(label, box.x + pad, y);
+  ctx.textAlign = 'right';
+  ctx.font = 'bold 17px Arial, sans-serif';
+  ctx.fillStyle = '#e8e4f5';
+  ctx.fillText(value, box.x + box.w - pad, y);
+}
+
+// Overshooting ease, so the stars land with a bit of snap
+function easeOutBack(t) {
+  const c = 1.70158;
+  const p = t - 1;
+  return 1 + (c + 1) * p * p * p + c * p * p;
+}
+
+// The three stars, popping in one after another
+function uiStarBurst(centerX, y, earned, baseSize, delay, gap) {
+  const step = gap === undefined ? 0.15 : gap;
+  const start = delay === undefined ? 0.15 : delay;
+  for (let i = 0; i < 3; i++) {
+    const t = clamp01((screenIntro - (start + i * step)) / 0.3);
+    if (t <= 0) continue;
+    const size = baseSize * easeOutBack(t);
+    const filled = i < earned;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.font = size + 'px monospace';
+    if (filled) {
+      ctx.shadowColor = '#ffcc44';
+      ctx.shadowBlur = 18 * t;
+      ctx.fillStyle = '#ffcc44';
+    } else {
+      ctx.fillStyle = '#3f3a52';
+    }
+    ctx.fillText('★', centerX + (i - 1) * (baseSize * 1.15), y);
+    ctx.restore();
+  }
+}
+
+function formatLevelTime(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return m + ':' + (s < 10 ? '0' + s : s);
+}
+
+// Level complete window
+function drawLevelCompletePopup() {
+  const stars = calculateStars(levelDeaths);
+  const accent = stars === 3 ? '#55dd88' : (stars > 0 ? '#ffcc44' : '#ff8866');
+  const box = uiPopup(540, 430, accent);
+
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 44px Impact, monospace';
+  ctx.fillStyle = accent;
+  ctx.fillText('LEVEL COMPLETE', GAME_WIDTH / 2, box.y + 64);
+
+  const active = getActiveLevelData();
+  if (active && active.name) {
+    ctx.font = '14px monospace';
+    ctx.fillStyle = '#7a6f9a';
+    ctx.fillText(active.name, GAME_WIDTH / 2, box.y + 92);
+  }
+
+  uiStarBurst(GAME_WIDTH / 2, box.y + 172, stars, 46);
+
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.fillRect(box.x + 54, box.y + 206, box.w - 108, 1);
+
+  uiPopupRow(box, box.y + 248, 'TIME', formatLevelTime(levelTime), '#88ddff');
+  uiPopupRow(box, box.y + 286, 'DEATHS', String(levelDeaths), '#ff8888');
+  uiPopupRow(box, box.y + 324, 'RATING', stars + ' / 3', '#ffcc44');
+
+  const messages = [
+    'Keep practicing. You can do better.',
+    'Good effort. Try again for more stars.',
+    'Great job. Keep improving.',
+    'PERFECT. Not a single death.'
+  ];
+  ctx.textAlign = 'center';
+  ctx.font = stars === 3 ? 'bold 17px Arial, sans-serif' : '17px Arial, sans-serif';
+  ctx.fillStyle = accent;
+  ctx.fillText(messages[stars], GAME_WIDTH / 2, box.y + 370);
+
+  // What happens next, with the auto-advance timer draining underneath
+  let footer;
+  if (customLevelSession) {
+    footer = customLevelSession.returnState === 'editor' ? 'Back to the editor' : 'Back to your levels';
+  } else if (currentLevel < levels.length - 1) {
+    footer = 'Next level loading';
+  } else {
+    footer = 'You beat every level  ·  ' + deaths + ' deaths in total';
+  }
+  ctx.font = '14px Arial, sans-serif';
+  ctx.fillStyle = '#8a84a0';
+  ctx.fillText(footer, GAME_WIDTH / 2, box.y + 404);
+
+  const barW = box.w - 200;
+  const barX = GAME_WIDTH / 2 - barW / 2;
+  const left = clamp01(levelCompleteTimer / LEVEL_COMPLETE_DURATION);
+  ctx.fillStyle = '#292437';
+  uiRoundRect(barX, box.y + 414, barW, 4, 2);
+  ctx.fill();
+  ctx.fillStyle = accent;
+  uiRoundRect(barX, box.y + 414, Math.max(2, barW * (1 - left)), 4, 2);
+  ctx.fill();
+
+  ctx.restore();
+  ctx.textAlign = 'left';
+}
+
+// Chapter-complete unlock window
+function drawUnlockPopup() {
+  // Height follows the list, so one unlock doesn't leave half a card empty
+  const itemCount = Math.max(1, unlockedItems.length);
+  const box = uiPopup(600, 270 + (itemCount - 1) * 78, '#8c44ff');
+
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 44px Impact, monospace';
+  ctx.fillStyle = '#ffcc44';
+  ctx.fillText('NEW UNLOCKS', GAME_WIDTH / 2, box.y + 68);
+
+  ctx.font = '16px Arial, sans-serif';
+  ctx.fillStyle = '#8a84a0';
+  ctx.fillText('Chapter complete. You earned:', GAME_WIDTH / 2, box.y + 98);
+
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.fillRect(box.x + 48, box.y + 118, box.w - 96, 1);
+
+  const rowH = 78;
+  const listTop = box.y + 150;
+  unlockedItems.forEach((item, index) => {
+    const appear = easeOutCubic(clamp01((screenIntro - (0.2 + index * 0.14)) / 0.4));
+    if (appear <= 0.001) return;
+    const y = listTop + index * rowH;
+
+    ctx.save();
+    ctx.globalAlpha = appear;
+    ctx.translate((1 - appear) * -20, 0);
+
+    uiCard(box.x + 48, y - 26, box.w - 96, 60, {
+      radius: 9, fill: 'rgba(33, 29, 46, 0.9)', border: '#463f5c', lineWidth: 1
+    });
+
+    // Clip to the row: the trail sample streams in from off the card edge
+    ctx.save();
+    uiRoundRect(box.x + 48, y - 26, box.w - 96, 60, 9);
+    ctx.clip();
+
+    // Swatch: the real colour, or a little trail sample
+    const swX = box.x + 70;
+    if (item.type === 'color') {
+      ctx.fillStyle = item.value;
+      uiRoundRect(swX, y - 14, 34, 34, 7);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    } else {
+      drawTrailPreview(item.value, swX + 12, y - 11, 28);
+      ctx.fillStyle = playerColor;
+      uiRoundRect(swX + 12, y - 11, 28, 28, 5);
+      ctx.fill();
+    }
+
+    ctx.textAlign = 'left';
+    ctx.font = 'bold 21px Arial, sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(item.name + (item.type === 'color' ? ' Color' : ' Trail'), swX + 60, y - 1);
+    ctx.font = '13px Arial, sans-serif';
+    ctx.fillStyle = '#8a84a0';
+    ctx.fillText('Equip it in CUSTOMIZE', swX + 60, y + 18);
+    ctx.restore();   // row clip
+    ctx.restore();
+  });
+
+  // Pulsing prompt so it reads as "waiting for you"
+  const pulse = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(uiTime * 3));
+  ctx.save();
+  ctx.globalAlpha = pulse;
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 16px Arial, sans-serif';
+  ctx.fillStyle = '#55dd88';
+  ctx.fillText('PRESS SPACE OR ENTER TO CONTINUE', GAME_WIDTH / 2, box.y + box.h - 34);
+  ctx.restore();
+
+  ctx.restore();
+  ctx.textAlign = 'left';
 }
 
 // Draw pause menu
 function drawPauseMenu() {
-  // Semi-transparent dark overlay over the game
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // Darken the game, then blur the edges of attention with a vignette
+  ctx.fillStyle = 'rgba(8, 7, 13, 0.82)';
+  ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+  const vignette = ctx.createLinearGradient(0, 0, 0, GAME_HEIGHT);
+  vignette.addColorStop(0, 'rgba(140, 68, 255, 0.07)');
+  vignette.addColorStop(0.5, 'rgba(0, 0, 0, 0)');
+  vignette.addColorStop(1, 'rgba(140, 68, 255, 0.07)');
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-  // Pause menu title
-  ctx.fillStyle = '#ffffff';
+  const intro = easeOutCubic(clamp01(screenIntro / 0.35));
+
+  ctx.save();
+  ctx.globalAlpha = intro;
+  ctx.textAlign = 'center';
   ctx.font = 'bold 72px Impact, monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText('PAUSED', canvas.width / 2, 180);
+  ctx.fillStyle = '#9844ff';
+  ctx.fillText('PAUSED', GAME_WIDTH / 2, 178 - (1 - intro) * 14);
+  ctx.font = '15px monospace';
+  ctx.fillStyle = '#7a6f9a';
+  const active = getActiveLevelData();
+  if (active && active.name) ctx.fillText(active.name, GAME_WIDTH / 2, 208);
+  ctx.restore();
 
-  // Pause menu buttons
   window.pauseButtons = [];
-  
-  const buttonWidth = 300;
-  const buttonHeight = 60;
-  const buttonX = canvas.width / 2 - buttonWidth / 2;
-  let buttonY = 280;
-  const buttonSpacing = 80;
 
-  // Resume button
-  const resumeButton = {
-    x: buttonX,
-    y: buttonY,
-    width: buttonWidth,
-    height: buttonHeight,
-    action: 'resume',
-    buttonIndex: 0
-  };
-  window.pauseButtons.push(resumeButton);
-  
-  ctx.fillStyle = isButtonHovered(resumeButton) ? '#555555' : '#444444';
-  ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
-  ctx.strokeStyle = isButtonHovered(resumeButton) ? '#aaaaaa' : '#888888';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 36px Impact, monospace';
+  const entries = [
+    { label: 'RESUME', action: 'resume', accent: '#55dd88' },
+    { label: 'RESTART', action: 'restart', accent: '#44aaff' },
+    { label: isFullscreenActive() ? 'EXIT FULLSCREEN' : 'FULLSCREEN',
+      action: 'fullscreen', accent: '#44ddcc' },
+    { label: 'SETTINGS', action: 'settings', accent: '#8c44ff' },
+    { label: customLevelSession
+        ? (customLevelSession.returnState === 'editor' ? 'BACK TO EDITOR' : 'BACK TO MY LEVELS')
+        : 'QUIT TO MENU',
+      action: 'quit', accent: '#ff6b6b' }
+  ];
+
+  const bw = 340, bh = 58, gap = 14;
+  entries.forEach((entry, index) => {
+    const btn = {
+      x: GAME_WIDTH / 2 - bw / 2,
+      y: 260 + index * (bh + gap),
+      width: bw, height: bh,
+      action: entry.action,
+      buttonIndex: index
+    };
+    window.pauseButtons.push(btn);
+
+    const appear = uiStagger(index, 0.05, 0.05);
+    if (appear <= 0.001) return;
+    ctx.save();
+    ctx.globalAlpha = appear;
+    ctx.translate(0, (1 - appear) * 12);
+    uiActionButton(btn, entry.label, {
+      accent: entry.accent,
+      font: '24px Arial, sans-serif',
+      chevron: true
+    });
+    ctx.restore();
+  });
+
+  ctx.save();
+  ctx.globalAlpha = easeOutCubic(clamp01((screenIntro - 0.3) / 0.5));
+  ctx.fillStyle = '#4a4560';
+  ctx.font = '14px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('RESUME', canvas.width / 2, buttonY + 40);
+  ctx.fillText('ESC  resume      R  restart      F  fullscreen', GAME_WIDTH / 2, 682);
+  ctx.restore();
+  ctx.textAlign = 'left';
+}
 
-  // Restart button
-  buttonY += buttonSpacing;
-  const restartButton = {
-    x: buttonX,
-    y: buttonY,
-    width: buttonWidth,
-    height: buttonHeight,
-    buttonIndex: 1,
-    action: 'restart'
-  };
-  window.pauseButtons.push(restartButton);
-  
-  ctx.fillStyle = isButtonHovered(restartButton) ? '#555555' : '#444444';
-  ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
-  ctx.strokeStyle = isButtonHovered(restartButton) ? '#aaaaaa' : '#888888';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 36px Impact, monospace';
-  ctx.fillText('RESTART', canvas.width / 2, buttonY + 40);
+// ===== SHARED MENU WIDGETS =====
+// Every menu screen is built from these, so they all share one look: the
+// drifting deception grid behind, an Impact header, rounded cards with an
+// accent tab, and content that staggers in when the screen appears.
 
-  // Settings button
-  buttonY += buttonSpacing;
-  const settingsButton = {
-    x: buttonX,
-    y: buttonY,
-    width: buttonWidth,
-    height: buttonHeight,
-    buttonIndex: 2,
-    action: 'settings'
-  };
-  window.pauseButtons.push(settingsButton);
-  
-  ctx.fillStyle = isButtonHovered(settingsButton) ? '#555555' : '#444444';
-  ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
-  ctx.strokeStyle = isButtonHovered(settingsButton) ? '#aaaaaa' : '#888888';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 36px Impact, monospace';
-  ctx.fillText('SETTINGS', canvas.width / 2, buttonY + 40);
+// Standard header. Returns the y the content below it should start at.
+function uiScreenHeader(title, subtitle, accent) {
+  const intro = easeOutCubic(clamp01(screenIntro / 0.5));
+  ctx.save();
+  ctx.globalAlpha = intro;
+  ctx.translate((1 - intro) * -24, 0);
+  ctx.textAlign = 'left';
+  ctx.font = 'bold 54px Impact, monospace';
+  ctx.fillStyle = accent || '#9844ff';
+  ctx.fillText(title, 90, 104);
+  if (subtitle) {
+    ctx.font = '17px monospace';
+    ctx.fillStyle = '#7a6f9a';
+    ctx.fillText(subtitle, 92, 134);
+  }
+  ctx.restore();
 
-  // Quit to Menu button
-  buttonY += buttonSpacing;
-  const quitButton = {
-    x: buttonX,
-    y: buttonY,
-    width: buttonWidth,
-    height: buttonHeight,
-    action: 'quit',
-    buttonIndex: 3
-  };
-  window.pauseButtons.push(quitButton);
-  
-  ctx.fillStyle = isButtonHovered(quitButton) ? '#555555' : '#444444';
-  ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
-  ctx.strokeStyle = isButtonHovered(quitButton) ? '#aaaaaa' : '#888888';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 36px Impact, monospace';
-  ctx.fillText('QUIT TO MENU', canvas.width / 2, buttonY + 40);
+  // Hairline under the header, drawing itself out from the left
+  const rule = easeOutCubic(clamp01((screenIntro - 0.15) / 0.6));
+  ctx.fillStyle = 'rgba(152, 68, 255, 0.25)';
+  ctx.fillRect(90, 152, 1020 * rule, 1);
+  return 190;
+}
 
-  // Instructions
-  ctx.fillStyle = '#aaaaaa';
-  ctx.font = '24px monospace';
-  ctx.fillText('ESC to Resume', canvas.width / 2, canvas.height - 40);
+// Eased progress value, shared by every bar on every screen so they all glide
+// up to their real value instead of snapping in on the first frame.
+function uiBarValue(key, target) {
+  if (!menuBarFill[key]) menuBarFill[key] = { shown: 0, target: 0 };
+  menuBarFill[key].target = clamp01(target);
+  return menuBarFill[key].shown;
+}
+
+function uiCard(x, y, w, h, opts) {
+  const o = opts || {};
+  uiRoundRect(x, y, w, h, o.radius === undefined ? 12 : o.radius);
+  ctx.fillStyle = o.fill || 'rgba(21, 19, 31, 0.9)';
+  ctx.fill();
+  ctx.strokeStyle = o.border || '#3a3550';
+  ctx.lineWidth = o.lineWidth || 2;
+  ctx.stroke();
+
+  if (o.scan) {
+    ctx.save();
+    uiRoundRect(x, y, w, h, o.radius === undefined ? 12 : o.radius);
+    ctx.clip();
+    const scanY = y + ((uiTime * 55) % (h + 120)) - 60;
+    const glow = ctx.createLinearGradient(0, scanY - 45, 0, scanY + 45);
+    glow.addColorStop(0, 'rgba(140, 68, 255, 0)');
+    glow.addColorStop(0.5, 'rgba(140, 68, 255, 0.08)');
+    glow.addColorStop(1, 'rgba(140, 68, 255, 0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(x, scanY - 45, w, 90);
+    ctx.restore();
+  }
+}
+
+// The menu's button look, reused everywhere. `btn` is the hit box the screen
+// already stores; this only draws it.
+function uiActionButton(btn, label, opts) {
+  const o = opts || {};
+  const active = o.active !== undefined ? o.active : isButtonHovered(btn);
+  const locked = !!o.locked;
+  const accent = o.accent || '#8c44ff';
+  const h = btn.height;
+
+  ctx.save();
+  if (active && !locked) {
+    ctx.shadowColor = accent;
+    ctx.shadowBlur = 16;
+  }
+  uiRoundRect(btn.x, btn.y, btn.width, h, o.radius === undefined ? 8 : o.radius);
+  ctx.fillStyle = locked
+    ? 'rgba(28, 26, 38, 0.9)'
+    : (o.danger
+        ? (active ? 'rgba(90, 40, 46, 0.95)' : 'rgba(58, 30, 36, 0.9)')
+        : (active ? 'rgba(58, 50, 84, 0.95)' : 'rgba(35, 31, 48, 0.88)'));
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = locked ? '#3d3a4d' : (active ? accent : (o.danger ? '#7a4a52' : '#463f5c'));
+  ctx.lineWidth = active ? 3 : 2;
+  ctx.stroke();
+
+  if (o.tab !== false) {
+    const tabH = (h - 18) * (active ? 1 : 0.4);
+    ctx.fillStyle = locked ? '#55506b' : accent;
+    uiRoundRect(btn.x + 8, btn.y + (h - tabH) / 2, 4, tabH, 2);
+    ctx.fill();
+  }
+
+  ctx.textAlign = o.center ? 'center' : 'left';
+  ctx.font = o.font || '26px Arial, sans-serif';
+  ctx.fillStyle = locked ? '#7e7a90' : (o.textColor || (active ? '#ffffff' : '#c9c4da'));
+  const labelX = o.center ? btn.x + btn.width / 2 : btn.x + (o.tab === false ? 18 : 28);
+  ctx.fillText(label, labelX, btn.y + h / 2 + (o.font && /1[0-9]px/.test(o.font) ? 5 : 9));
+
+  if (o.chevron && active && !locked) {
+    ctx.textAlign = 'right';
+    ctx.font = '22px Arial, sans-serif';
+    ctx.fillStyle = accent;
+    ctx.fillText('›', btn.x + btn.width - 20, btn.y + h / 2 + 8);
+  }
+  ctx.restore();
+}
+
+// Bottom-left back button, in the same place on every screen
+function uiBackButton(label) {
+  const btn = { x: 90, y: 636, width: 150, height: 46, action: 'back' };
+  const intro = easeOutCubic(clamp01((screenIntro - 0.3) / 0.5));
+  ctx.save();
+  ctx.globalAlpha = intro;
+  uiActionButton(btn, label || '◀ BACK', { font: '18px Arial, sans-serif', accent: '#8c44ff' });
+  ctx.restore();
+  return btn;
+}
+
+function uiFooter(text) {
+  ctx.save();
+  ctx.globalAlpha = easeOutCubic(clamp01((screenIntro - 0.5) / 0.6));
+  ctx.fillStyle = '#4a4560';
+  ctx.font = '14px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(text, GAME_WIDTH / 2, 700);
+  ctx.restore();
+  ctx.textAlign = 'left';
+}
+
+// Per-item stagger, so lists and grids deal themselves in
+function uiStagger(index, step, delay) {
+  return easeOutCubic(clamp01((screenIntro - ((delay === undefined ? 0.2 : delay) + index * (step === undefined ? 0.05 : step))) / 0.45));
+}
+
+function uiStarRow(x, y, stars, size, dim) {
+  ctx.textAlign = 'left';
+  ctx.font = size + 'px monospace';
+  for (let i = 0; i < 3; i++) {
+    ctx.fillStyle = i < stars ? '#ffcc44' : (dim || '#3f3a52');
+    ctx.fillText('★', x + i * (size * 0.95), y);
+  }
+}
+
+// ===== MAIN MENU =====
+// The menu is a two-column console: the title and buttons on the left, and an
+// info panel on the right that describes whatever entry is highlighted. Giving
+// the detail text its own column is what keeps long copy - the level editor
+// unlock requirement especially - from ever crowding the buttons.
+
+const MENU_ENTRIES = [
+  { label: 'START GAME', action: 'startGame',   accent: '#44aaff', blurb: 'Face the story, one chapter at a time.' },
+  { label: 'MY LEVELS',  action: 'levelEditor', accent: '#8c44ff', blurb: 'Build, test and play levels of your own.' },
+  { label: 'CUSTOMIZE',  action: 'customize',   accent: '#ffcc44', blurb: 'Change your cube and the trail it leaves.' },
+  { label: 'SETTINGS',   action: 'settings',    accent: '#55dd88', blurb: 'Audio levels and everything else.' }
+];
+
+// Screens that use the shared menu look and its animation clock
+const UI_SCREENS = ['menu', 'chapterSelect', 'levelSelect', 'customize', 'settings', 'paused',
+                   'levelComplete', 'unlockNotification'];
+
+const MENU_LAYOUT = {
+  colX: 90, btnW: 380, btnH: 62, btnGap: 74, btnTop: 250,
+  panelX: 560, panelY: 120, panelW: 560, panelH: 470, pad: 32
+};
+
+let uiTime = 0;           // drives every looping animation, on every screen
+let screenIntro = 0;      // seconds since the current screen appeared
+let uiScreenKey = null;   // which screen screenIntro is measuring
+let menuActiveIndex = 0;   // entry the info panel is describing
+let menuPanelIndex = 0;    // entry it is currently showing, during a crossfade
+let menuPanelFade = 1;
+let menuButtonSlide = [];
+let menuBarFill = {};
+let uiMotes = null;
+let uiGlitch = { timer: 0, next: 0.6, split: 0, sliceY: 0, sliceH: 0, sliceDx: 0 };
+
+function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
+
+// Frame-rate independent lerp, so the menu animates the same at 60 and 144 Hz
+function approach(current, target, dt, rate) {
+  return current + (target - current) * (1 - Math.exp(-rate * dt));
+}
+
+function uiRoundRect(x, y, w, h, r) {
+  const radius = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + w - radius, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+  ctx.lineTo(x + w, y + h - radius);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+  ctx.lineTo(x + radius, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+}
+
+// Blocks drifting up the background, half of them only pretending to be solid
+function buildUiMotes() {
+  const motes = [];
+  for (let i = 0; i < 18; i++) {
+    motes.push({
+      x: Math.random() * GAME_WIDTH,
+      y: Math.random() * GAME_HEIGHT,
+      size: 14 + Math.random() * 34,
+      speed: 5 + Math.random() * 15,
+      phase: Math.random() * Math.PI * 2,
+      rate: 0.3 + Math.random() * 0.5
+    });
+  }
+  return motes;
+}
+
+// Every menu-style screen shares this clock, so they all breathe in time and
+// each one replays its intro when you arrive on it.
+function updateUiAnimation(screen, deltaTime) {
+  const dt = Math.min(deltaTime, 0.1); // a tab switch shouldn't teleport everything
+
+  if (uiScreenKey !== screen) {
+    uiScreenKey = screen;
+    screenIntro = 0;
+    menuPanelFade = 1;
+    menuBarFill = {};
+    menuButtonSlide = MENU_ENTRIES.map(() => 0);
+  }
+  uiTime += dt;
+  screenIntro += dt;
+  if (!uiMotes) uiMotes = buildUiMotes();
+
+  uiMotes.forEach(m => {
+    m.y -= m.speed * dt;
+    if (m.y < -m.size) {
+      m.y = GAME_HEIGHT + m.size;
+      m.x = Math.random() * GAME_WIDTH;
+    }
+  });
+
+  // Progress bars ease toward their real value instead of snapping in
+  Object.keys(menuBarFill).forEach(key => {
+    const b = menuBarFill[key];
+    b.shown = approach(b.shown, b.target, dt, 7);
+  });
+
+  // The rest is main-menu specific
+  if (screen !== 'menu') return;
+
+  // Title glitch: short bursts with quiet gaps between them
+  uiGlitch.timer += dt;
+  if (uiGlitch.timer >= uiGlitch.next) {
+    uiGlitch.timer = 0;
+    uiGlitch.next = 0.4 + Math.random() * 2.6;
+    uiGlitch.split = 3 + Math.random() * 6;
+    uiGlitch.sliceY = Math.random();
+    uiGlitch.sliceH = 6 + Math.random() * 16;
+    uiGlitch.sliceDx = (Math.random() - 0.5) * 30;
+  }
+  uiGlitch.split = approach(uiGlitch.split, 0, dt, 7);
+
+  // The panel follows the mouse when it is over a button, keyboard focus otherwise
+  const buttons = window.menuButtons || [];
+  let active = Math.min(Math.max(0, selectedButtonIndex), MENU_ENTRIES.length - 1);
+  buttons.forEach((b, i) => {
+    if (mouseX >= b.x && mouseX <= b.x + b.width && mouseY >= b.y && mouseY <= b.y + b.height) active = i;
+  });
+  menuActiveIndex = active;
+
+  MENU_ENTRIES.forEach((entry, i) => {
+    menuButtonSlide[i] = approach(menuButtonSlide[i] || 0, i === active ? 18 : 0, dt, 14);
+  });
+
+  // Crossfade the panel out and back in when the highlight moves
+  if (menuPanelIndex !== active) {
+    menuPanelFade = approach(menuPanelFade, 0, dt, 24);
+    if (menuPanelFade < 0.06) menuPanelIndex = active;
+  } else {
+    menuPanelFade = approach(menuPanelFade, 1, dt, 16);
+  }
+}
+
+function drawUiBackground() {
+  const sky = ctx.createLinearGradient(0, 0, 0, GAME_HEIGHT);
+  sky.addColorStop(0, DEVELOPER_MODE ? '#171739' : '#15121e');
+  sky.addColorStop(1, DEVELOPER_MODE ? '#0b0b1e' : '#08070d');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+  // Slow drifting grid
+  const cell = 60;
+  const drift = (uiTime * 10) % cell;
+  ctx.strokeStyle = 'rgba(152, 68, 255, 0.06)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = -cell; x <= GAME_WIDTH + cell; x += cell) {
+    ctx.moveTo(x + drift, 0);
+    ctx.lineTo(x + drift, GAME_HEIGHT);
+  }
+  for (let y = -cell; y <= GAME_HEIGHT + cell; y += cell) {
+    ctx.moveTo(0, y - drift);
+    ctx.lineTo(GAME_WIDTH, y - drift);
+  }
+  ctx.stroke();
+
+  // Some blocks are solid, some are only outlines - the game's whole premise
+  (uiMotes || []).forEach(m => {
+    const breathe = 0.5 + 0.5 * Math.sin(uiTime * m.rate * 2 + m.phase);
+    ctx.globalAlpha = 0.08 + 0.13 * breathe;
+    if (Math.sin(uiTime * m.rate + m.phase) > 0.5) {
+      ctx.fillStyle = '#8c44ff';
+      ctx.fillRect(m.x, m.y, m.size, m.size);
+    } else {
+      ctx.strokeStyle = '#8c44ff';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      ctx.strokeRect(m.x, m.y, m.size, m.size);
+      ctx.setLineDash([]);
+    }
+    ctx.globalAlpha = 1;
+  });
+}
+
+function drawMenuTitle() {
+  const x = MENU_LAYOUT.colX;
+  const y = 142;
+  const intro = easeOutCubic(clamp01(screenIntro / 0.7));
+  const split = uiGlitch.split;
+
+  ctx.save();
+  ctx.textAlign = 'left';
+  ctx.font = 'bold 84px Impact, monospace';
+  ctx.globalAlpha = intro;
+  ctx.translate((1 - intro) * -40, 0);
+
+  if (split > 0.4) {
+    // Chromatic split, the cheap trick that reads instantly as "signal error"
+    ctx.globalAlpha = intro * 0.5;
+    ctx.fillStyle = '#ff2b6b';
+    ctx.fillText('DISBELIEVE', x - split, y);
+    ctx.fillStyle = '#2bf0ff';
+    ctx.fillText('DISBELIEVE', x + split, y);
+    ctx.globalAlpha = intro;
+  }
+
+  ctx.fillStyle = '#9844ff';
+  ctx.fillText('DISBELIEVE', x, y);
+
+  if (split > 0.4) {
+    // One horizontal band of the title slides out of place
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x - 40, y - 68 + uiGlitch.sliceY * 72, 560, uiGlitch.sliceH);
+    ctx.clip();
+    ctx.fillStyle = '#e8dcff';
+    ctx.fillText('DISBELIEVE', x + uiGlitch.sliceDx, y);
+    ctx.restore();
+  }
+  ctx.restore();
+
+  // Tagline types out, with a cursor that keeps blinking afterwards
+  const tagline = 'Can you survive the deception?';
+  const shown = tagline.slice(0, Math.floor(clamp01((screenIntro - 0.5) / 1.1) * tagline.length));
+  ctx.save();
+  ctx.globalAlpha = intro;
+  ctx.textAlign = 'left';
+  ctx.font = '19px monospace';
+  ctx.fillStyle = '#7a6f9a';
+  ctx.fillText(shown, x, 184);
+  if (Math.sin(uiTime * 6) > 0) {
+    ctx.fillStyle = '#9844ff';
+    ctx.fillRect(x + ctx.measureText(shown).width + 3, 170, 10, 17);
+  }
+  ctx.restore();
+}
+
+// One labelled progress bar. Returns the y its bottom edge sits on.
+function uiStat(x, y, w, label, valueText, ratio, color, key) {
+  const fillValue = uiBarValue(key, ratio);
 
   ctx.textAlign = 'left';
+  ctx.font = '13px Arial, sans-serif';
+  ctx.fillStyle = '#8a84a0';
+  ctx.fillText(label, x, y);
+  ctx.textAlign = 'right';
+  ctx.font = 'bold 14px Arial, sans-serif';
+  ctx.fillStyle = '#e8e4f5';
+  ctx.fillText(valueText, x + w, y);
+
+  const barY = y + 11;
+  ctx.fillStyle = '#292437';
+  uiRoundRect(x, barY, w, 8, 4);
+  ctx.fill();
+
+  const fill = fillValue;
+  if (fill > 0.004) {
+    ctx.fillStyle = color;
+    uiRoundRect(x, barY, Math.max(8, w * fill), 8, 4);
+    ctx.fill();
+  }
+  return barY + 8;
+}
+
+function drawMenuPanelBody(entry, locked, x, y, w) {
+  const progress = getEditorUnlockProgress();
+
+  if (entry.action === 'startGame') {
+    let cursor = y;
+    cursor = uiStat(x, cursor, w, 'LEVELS COMPLETED', progress.completed + ' / ' + progress.totalLevels,
+                          progress.completed / progress.totalLevels, '#44aaff', 'story-levels') + 38;
+    cursor = uiStat(x, cursor, w, 'STARS EARNED', progress.stars + ' / ' + progress.maxStars,
+                          progress.stars / progress.maxStars, '#ffcc44', 'story-stars') + 46;
+
+    ctx.textAlign = 'left';
+    ctx.font = '13px Arial, sans-serif';
+    ctx.fillStyle = '#6d6786';
+    ctx.fillText('CHAPTERS', x, cursor);
+    cursor += 28;
+
+    chapters.forEach((chapter, chapterIndex) => {
+      let done = 0;
+      for (let i = 0; i < chapter.levels.length; i++) {
+        if (completedLevels.has(getGlobalLevelIndex(chapterIndex, i))) done++;
+      }
+      const complete = done === chapter.levels.length;
+      ctx.textAlign = 'left';
+      ctx.font = '15px Arial, sans-serif';
+      ctx.fillStyle = complete ? '#55dd88' : (done > 0 ? '#c9c4da' : '#6d6786');
+      ctx.fillText(chapter.name, x, cursor);
+      ctx.textAlign = 'right';
+      ctx.font = '14px Arial, sans-serif';
+      ctx.fillStyle = complete ? '#55dd88' : '#8a84a0';
+      ctx.fillText(done + ' / ' + chapter.levels.length, x + w, cursor);
+      cursor += 27;
+    });
+    return;
+  }
+
+  if (entry.action === 'levelEditor') {
+    if (locked) {
+      // The reason this redesign exists: the unlock detail gets a whole column
+      ctx.textAlign = 'left';
+      ctx.fillStyle = 'rgba(255, 90, 90, 0.12)';
+      uiRoundRect(x, y - 17, 104, 26, 13);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 120, 120, 0.35)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.font = 'bold 13px Arial, sans-serif';
+      ctx.fillStyle = '#ff8a8a';
+      ctx.fillText('\u{1F512} LOCKED', x + 13, y + 1);
+
+      let cursor = y + 48;
+      ctx.font = '16px Arial, sans-serif';
+      ctx.fillStyle = '#c9c4da';
+      ctx.fillText(getEditorUnlockHint(), x, cursor);
+      cursor += 44;
+
+      cursor = uiStat(x, cursor, w, 'LEVELS FINISHED', progress.completed + ' / ' + progress.totalLevels,
+                            progress.completed / progress.totalLevels, '#8c44ff', 'unlock-levels') + 38;
+      cursor = uiStat(x, cursor, w, 'STARS EARNED', progress.stars + ' / ' + progress.requiredStars,
+                            progress.stars / progress.requiredStars, '#8c44ff', 'unlock-stars') + 40;
+
+      const remaining = [];
+      if (progress.levelsLeft > 0) {
+        remaining.push(progress.levelsLeft + (progress.levelsLeft === 1 ? ' level' : ' levels'));
+      }
+      if (progress.starsLeft > 0) remaining.push(progress.starsLeft + '★');
+      ctx.textAlign = 'left';
+      ctx.font = '15px Arial, sans-serif';
+      ctx.fillStyle = '#8a84a0';
+      ctx.fillText(remaining.length ? remaining.join(' and ') + ' to go' : 'Requirements met.', x, cursor);
+      return;
+    }
+
+    const saved = (typeof loadCustomLevels === 'function') ? loadCustomLevels() : [];
+    ctx.textAlign = 'left';
+    ctx.font = 'bold 44px Impact, monospace';
+    ctx.fillStyle = '#8c44ff';
+    ctx.fillText(saved.length, x, y + 24);
+    ctx.font = '15px Arial, sans-serif';
+    ctx.fillStyle = '#8a84a0';
+    ctx.fillText(saved.length === 1 ? 'level saved' : 'levels saved', x + 46, y + 24);
+
+    let cursor = y + 70;
+    saved.slice(0, 5).forEach(level => {
+      ctx.textAlign = 'left';
+      ctx.font = '15px Arial, sans-serif';
+      ctx.fillStyle = '#c9c4da';
+      ctx.fillText(level.name || 'Untitled', x, cursor);
+      cursor += 26;
+    });
+    if (!saved.length) {
+      ctx.font = '15px Arial, sans-serif';
+      ctx.fillStyle = '#6d6786';
+      ctx.fillText('Nothing built yet. Open it and make something.', x, cursor);
+    }
+    return;
+  }
+
+  if (entry.action === 'customize') {
+    // A live preview of the cube, idling the way it does in game
+    const bob = Math.sin(uiTime * 2.2) * 5;
+    const size = 70;
+    const px = x + 10;
+    const py = y + 30 + bob;
+
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    ctx.fillRect(px - 12, y + 30 + size + 8, size + 24, 4);
+    drawPlayer(px, py, size, size);
+
+    ctx.textAlign = 'left';
+    ctx.font = '13px Arial, sans-serif';
+    ctx.fillStyle = '#6d6786';
+    ctx.fillText('COLOR', px + size + 40, y + 42);
+    ctx.fillStyle = playerColor;
+    uiRoundRect(px + size + 40, y + 52, 26, 26, 5);
+    ctx.fill();
+    ctx.font = '15px monospace';
+    ctx.fillStyle = '#c9c4da';
+    ctx.fillText(playerColor.toUpperCase(), px + size + 76, y + 71);
+
+    ctx.font = '13px Arial, sans-serif';
+    ctx.fillStyle = '#6d6786';
+    ctx.fillText('TRAIL', px + size + 40, y + 110);
+    ctx.font = '16px Arial, sans-serif';
+    ctx.fillStyle = '#c9c4da';
+    ctx.fillText(playerTrail === 'none' ? 'None' : playerTrail.charAt(0).toUpperCase() + playerTrail.slice(1),
+                 px + size + 40, y + 134);
+    return;
+  }
+
+  if (entry.action === 'settings') {
+    let cursor = y;
+    cursor = uiStat(x, cursor, w, 'MUSIC', Math.round(musicVolume * 100) + '%',
+                          musicVolume, '#55dd88', 'set-music') + 38;
+    cursor = uiStat(x, cursor, w, 'SOUND EFFECTS', Math.round(sfxVolume * 100) + '%',
+                          sfxVolume, '#55dd88', 'set-sfx') + 46;
+
+    ctx.textAlign = 'left';
+    ctx.font = '13px Arial, sans-serif';
+    ctx.fillStyle = '#6d6786';
+    ctx.fillText('CONTROLS', x, cursor);
+    cursor += 28;
+    [['Move', 'A / D  or  ← →'], ['Jump', 'SPACE  or  W'], ['Restart', 'R'], ['Pause', 'ESC']]
+      .forEach(row => {
+        ctx.textAlign = 'left';
+        ctx.font = '15px Arial, sans-serif';
+        ctx.fillStyle = '#c9c4da';
+        ctx.fillText(row[0], x, cursor);
+        ctx.textAlign = 'right';
+        ctx.font = '14px monospace';
+        ctx.fillStyle = '#8a84a0';
+        ctx.fillText(row[1], x + w, cursor);
+        cursor += 27;
+      });
+  }
+}
+
+function drawMenuPanel(editorUnlocked) {
+  const L = MENU_LAYOUT;
+  const intro = easeOutCubic(clamp01((screenIntro - 0.3) / 0.7));
+  if (intro <= 0.001) return;
+
+  ctx.save();
+  ctx.globalAlpha = intro;
+
+  uiRoundRect(L.panelX, L.panelY, L.panelW, L.panelH, 12);
+  ctx.fillStyle = 'rgba(21, 19, 31, 0.9)';
+  ctx.fill();
+  ctx.strokeStyle = '#3a3550';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // A scanline sweeping down the card, so it never looks like a static box
+  ctx.save();
+  uiRoundRect(L.panelX, L.panelY, L.panelW, L.panelH, 12);
+  ctx.clip();
+  const scanY = L.panelY + ((uiTime * 55) % (L.panelH + 120)) - 60;
+  const glow = ctx.createLinearGradient(0, scanY - 45, 0, scanY + 45);
+  glow.addColorStop(0, 'rgba(140, 68, 255, 0)');
+  glow.addColorStop(0.5, 'rgba(140, 68, 255, 0.08)');
+  glow.addColorStop(1, 'rgba(140, 68, 255, 0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(L.panelX, scanY - 45, L.panelW, 90);
+  ctx.restore();
+
+  const entry = MENU_ENTRIES[menuPanelIndex] || MENU_ENTRIES[0];
+  const locked = entry.action === 'levelEditor' && !editorUnlocked;
+  const x = L.panelX + L.pad;
+  const w = L.panelW - L.pad * 2;
+
+  // Content fades out and back in when the highlighted entry changes
+  ctx.globalAlpha = intro * menuPanelFade;
+  ctx.translate(0, (1 - menuPanelFade) * 8);
+
+  ctx.textAlign = 'left';
+  ctx.font = 'bold 32px Impact, monospace';
+  ctx.fillStyle = locked ? '#7e7a90' : entry.accent;
+  ctx.fillText(entry.label, x, L.panelY + 62);
+
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.fillRect(x, L.panelY + 78, w, 1);
+
+  ctx.font = '15px Arial, sans-serif';
+  ctx.fillStyle = '#8a84a0';
+  ctx.fillText(entry.blurb, x, L.panelY + 108);
+
+  drawMenuPanelBody(entry, locked, x, L.panelY + 160, w);
+  ctx.restore();
 }
 
 // Draw main menu
 function drawMenu() {
-  // Use special background color in developer mode
-  ctx.fillStyle = DEVELOPER_MODE ? '#1a1a3a' : '#2a2a2a';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const L = MENU_LAYOUT;
+  const editorUnlocked = isLevelEditorUnlocked();
 
-  // Title
-  ctx.fillStyle = '#9844ffff';
-  ctx.font = 'bold 96px Impact, monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText('DISBELIEVE', canvas.width / 2, 150);
+  drawUiBackground();
+  drawMenuTitle();
+  drawMenuPanel(editorUnlocked);
 
-  // Subtitle
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '30px monospace';
-  ctx.fillText('Can you survive the deception?', canvas.width / 2, 210);
-
-  // Menu buttons
   window.menuButtons = [];
-  
-  // Start Game button
-  let startX = canvas.width / 2 - 150;
-  let startY = 300;
-  const startButton = { x: startX, y: startY, width: 300, height: 60, action: 'startGame', buttonIndex: 0 };
-  window.menuButtons.push(startButton);
-  
-  ctx.fillStyle = isButtonHovered(startButton) ? '#555555' : '#444444';
-  ctx.fillRect(startX, startY, 300, 60);
-  ctx.strokeStyle = isButtonHovered(startButton) ? '#aaaaaa' : '#888888';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(startX, startY, 300, 60);
-  
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '32px Arial, sans-serif';
-  ctx.fillText('START GAME', canvas.width / 2, startY + 40);
 
-  // Settings button
-  let settingsY = 380;
-  const settingsButton = { x: startX, y: settingsY, width: 300, height: 60, action: 'settings', buttonIndex: 1 };
-  window.menuButtons.push(settingsButton);
-  
-  ctx.fillStyle = isButtonHovered(settingsButton) ? '#555555' : '#444444';
-  ctx.fillRect(startX, settingsY, 300, 60);
-  ctx.strokeStyle = isButtonHovered(settingsButton) ? '#aaaaaa' : '#888888';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(startX, settingsY, 300, 60);
-  
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '32px Arial, sans-serif';
-  ctx.fillText('SETTINGS', canvas.width / 2, settingsY + 40);
+  MENU_ENTRIES.forEach((entry, index) => {
+    const locked = entry.action === 'levelEditor' && !editorUnlocked;
+    const rowY = L.btnTop + index * L.btnGap;
+    const slide = menuButtonSlide[index] || 0;
 
-  // Customize button
-  let customizeY = 460;
-  const customizeButton = { x: startX, y: customizeY, width: 300, height: 60, action: 'customize', buttonIndex: 2 };
-  window.menuButtons.push(customizeButton);
-  
-  ctx.fillStyle = isButtonHovered(customizeButton) ? '#555555' : '#444444';
-  ctx.fillRect(startX, customizeY, 300, 60);
-  ctx.strokeStyle = isButtonHovered(customizeButton) ? '#aaaaaa' : '#888888';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(startX, customizeY, 300, 60);
-  
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '32px Arial, sans-serif';
-  ctx.fillText('CUSTOMIZE', canvas.width / 2, customizeY + 40);
+    // The hit box covers both the resting and the slid-out position, so the
+    // button can never slide out from under the cursor and start flickering
+    const button = {
+      x: L.colX,
+      y: rowY,
+      width: L.btnW + 18,
+      height: L.btnH,
+      action: entry.action,
+      buttonIndex: index,
+      locked: locked
+    };
+    window.menuButtons.push(button);
 
-  // Instructions
-  ctx.fillStyle = '#666666';
-  ctx.font = '26px monospace';
-  ctx.fillText('Hint: DISBELIEVE WHAT YOU SEE', canvas.width / 2, canvas.height - 50);
+    const appear = easeOutCubic(clamp01((screenIntro - (0.15 + index * 0.08)) / 0.5));
+    if (appear <= 0.001) return;
+
+    const active = index === menuActiveIndex;
+    const bx = L.colX + slide;
+
+    ctx.save();
+    ctx.globalAlpha = appear;
+    ctx.translate((1 - appear) * -30, 0);
+
+    if (active && !locked) {
+      // A soft glow so the highlighted row reads from across the screen
+      ctx.shadowColor = entry.accent;
+      ctx.shadowBlur = 18;
+    }
+    uiRoundRect(bx, rowY, L.btnW, L.btnH, 8);
+    ctx.fillStyle = locked
+      ? 'rgba(28, 26, 38, 0.9)'
+      : (active ? 'rgba(58, 50, 84, 0.95)' : 'rgba(35, 31, 48, 0.88)');
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.strokeStyle = locked ? '#3d3a4d' : (active ? entry.accent : '#463f5c');
+    ctx.lineWidth = active ? 3 : 2;
+    ctx.stroke();
+
+    // Accent tab on the left edge, which stretches when the row is active
+    const tabH = (L.btnH - 18) * (active ? 1 : 0.4);
+    ctx.fillStyle = locked ? '#55506b' : entry.accent;
+    uiRoundRect(bx + 8, rowY + (L.btnH - tabH) / 2, 4, tabH, 2);
+    ctx.fill();
+
+    ctx.textAlign = 'left';
+    ctx.font = '30px Arial, sans-serif';
+    ctx.fillStyle = locked ? '#7e7a90' : (active ? '#ffffff' : '#c9c4da');
+    ctx.fillText(entry.label, bx + 28, rowY + 41);
+
+    if (locked) {
+      ctx.textAlign = 'right';
+      ctx.font = '20px Arial, sans-serif';
+      ctx.fillText('\u{1F512}', bx + L.btnW - 18, rowY + 40);
+    } else if (active) {
+      ctx.textAlign = 'right';
+      ctx.font = '22px Arial, sans-serif';
+      ctx.fillStyle = entry.accent;
+      ctx.fillText('›', bx + L.btnW - 20, rowY + 42);
+    }
+    ctx.restore();
+  });
+
+  // Feedback after clicking something that is still locked
+  if (menuNoticeTimer > 0 && menuNotice) {
+    const fade = clamp01(menuNoticeTimer / 0.8);
+    ctx.save();
+    ctx.globalAlpha = fade;
+    ctx.font = 'bold 16px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    const noticeW = ctx.measureText(menuNotice).width + 44;
+    const noticeX = GAME_WIDTH / 2 - noticeW / 2;
+    uiRoundRect(noticeX, 626, noticeW, 38, 19);
+    ctx.fillStyle = 'rgba(255, 90, 90, 0.14)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 120, 120, 0.4)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = '#ff8866';
+    ctx.fillText(menuNotice, GAME_WIDTH / 2, 650);
+    ctx.restore();
+  }
+
+  ctx.globalAlpha = easeOutCubic(clamp01((screenIntro - 0.8) / 0.6));
+  ctx.fillStyle = '#4a4560';
+  ctx.font = '14px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('↑ ↓  navigate      ENTER  select      F  fullscreen      Hint: DISBELIEVE WHAT YOU SEE',
+               GAME_WIDTH / 2, 694);
+  ctx.globalAlpha = 1;
 
   ctx.textAlign = 'left';
 }
@@ -3191,281 +4373,152 @@ function isButtonHovered(button) {
 
 // Draw customization screen
 function drawCustomization() {
-  // Use special background color in developer mode
-  ctx.fillStyle = DEVELOPER_MODE ? '#1a1a3a' : '#2a2a2a';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  // Title
-  ctx.fillStyle = '#9844ffff';
-  ctx.font = 'bold 72px Impact, monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText('CUSTOMIZE PLAYER', canvas.width / 2, 100);
-  
-  // Developer mode indicator
-  if (DEVELOPER_MODE) {
-    ctx.fillStyle = 'rgba(255, 215, 0, 0.9)';
-    ctx.font = 'bold 20px monospace';
-    ctx.fillText('🎮 DEVELOPER MODE - ALL UNLOCKED', canvas.width / 2, 140);
-  }
+  drawUiBackground();
+  uiScreenHeader('CUSTOMIZE', DEVELOPER_MODE ? 'DEVELOPER MODE — everything unlocked' : 'Make the cube yours', '#ffcc44');
 
   window.customizeButtons = [];
   let customizeButtonIndex = 0;
 
-  // Color selection
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 36px Impact, monospace';
-  ctx.fillText('COLOR', canvas.width / 2, 180);
+  // ---- Live preview card on the right ----
+  const cardX = 750, cardY = 196, cardW = 360, cardH = 400;
+  uiCard(cardX, cardY, cardW, cardH, { scan: true });
+  ctx.textAlign = 'left';
+  ctx.font = 'bold 22px Impact, monospace';
+  ctx.fillStyle = '#ffcc44';
+  ctx.fillText('PREVIEW', cardX + 26, cardY + 44);
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.fillRect(cardX + 26, cardY + 58, cardW - 52, 1);
 
-  const colorBoxSize = 60;
-  const colorSpacing = 80;
-  const colorStartX = canvas.width / 2 - (playerColors.length * colorSpacing) / 2 + colorSpacing / 2;
-  const colorY = 200;
+  // The cube runs on the spot, trailing whatever effect is selected
+  const runX = cardX + cardW / 2;
+  const runY = cardY + 190;
+  const bob = Math.abs(Math.sin(uiTime * 3)) * 16;
+  const size = 58;
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  ctx.fillRect(cardX + 50, runY + 4, cardW - 100, 3);
+  drawTrailPreview(playerTrail, runX - size / 2, runY - size - bob, size);
+  drawPlayer(runX - size / 2, runY - size - bob, size, size);
 
-  playerColors.forEach((color, index) => {
-    const x = colorStartX + index * colorSpacing - colorBoxSize / 2;
-    const isUnlocked = isColorUnlocked(color);
-    const colorBox = { 
-      x: x, 
-      y: colorY, 
-      width: colorBoxSize, 
-      height: colorBoxSize,
-      buttonIndex: isUnlocked ? customizeButtonIndex : undefined
-    };
-    
-    if (isUnlocked) {
-      customizeButtonIndex++;
-    }
-    
-    // Draw color box (dimmed if locked)
-    if (isUnlocked) {
-      ctx.fillStyle = color.value;
-    } else {
-      ctx.fillStyle = '#333333'; // Dark gray for locked
-    }
-    ctx.fillRect(x, colorY, colorBoxSize, colorBoxSize);
-    
-    // Highlight selected or hovered (only if unlocked)
-    if (playerColor === color.value && isUnlocked) {
-      ctx.strokeStyle = '#ffff44';
-      ctx.lineWidth = 4;
-      ctx.strokeRect(x - 4, colorY - 4, colorBoxSize + 8, colorBoxSize + 8);
-    } else if (isButtonHovered(colorBox) && isUnlocked) {
-      ctx.strokeStyle = '#aaaaaa';
-      ctx.lineWidth = 3;
-      ctx.strokeRect(x - 2, colorY - 2, colorBoxSize + 4, colorBoxSize + 4);
-    } else {
-      ctx.strokeStyle = isUnlocked ? '#888888' : '#555555';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(x, colorY, colorBoxSize, colorBoxSize);
-    }
-    
-    // Lock icon for locked colors
-    if (!isUnlocked) {
-      ctx.fillStyle = '#666666';
-      ctx.font = '32px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('🔒', x + colorBoxSize / 2, colorY + colorBoxSize / 2 + 10);
-    }
-    
-    // Color name (dimmed if locked)
-    ctx.fillStyle = isUnlocked ? '#aaaaaa' : '#555555';
-    ctx.font = '16px monospace';
-    ctx.fillText(color.name, x + colorBoxSize / 2, colorY + colorBoxSize + 20);
-    
-    window.customizeButtons.push({
-      ...colorBox,
-      action: 'color',
-      value: color.value,
-      unlocked: isUnlocked
-    });
-  });
-
-  // Trail selection
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 36px Impact, monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('TRAIL EFFECT', canvas.width / 2, 360);
+  ctx.font = '13px Arial, sans-serif';
+  ctx.fillStyle = '#6d6786';
+  ctx.fillText('COLOR', cardX + cardW / 2, cardY + 268);
+  ctx.font = '18px monospace';
+  ctx.fillStyle = '#e8e4f5';
+  ctx.fillText(getColorName(playerColor), cardX + cardW / 2, cardY + 294);
+  ctx.font = '13px Arial, sans-serif';
+  ctx.fillStyle = '#6d6786';
+  ctx.fillText('TRAIL', cardX + cardW / 2, cardY + 336);
+  ctx.font = '18px Arial, sans-serif';
+  ctx.fillStyle = '#e8e4f5';
+  ctx.fillText(getTrailName(playerTrail), cardX + cardW / 2, cardY + 362);
 
-  const trailBoxSize = 100;
-  const trailSpacing = 140;
-  const trailStartX = canvas.width / 2 - (playerTrails.length * trailSpacing) / 2 + trailSpacing / 2;
-  const trailY = 390;
+  // ---- Colors ----
+  ctx.textAlign = 'left';
+  ctx.font = 'bold 20px Impact, monospace';
+  ctx.fillStyle = '#c9c4da';
+  ctx.fillText('COLOR', 90, 222);
 
-  playerTrails.forEach((trail, index) => {
-    const x = trailStartX + index * trailSpacing - trailBoxSize / 2;
-    const isUnlocked = isTrailUnlocked(trail);
-    const trailBox = { 
-      x: x, 
-      y: trailY, 
-      width: trailBoxSize, 
-      height: trailBoxSize,
-      buttonIndex: isUnlocked ? customizeButtonIndex : undefined
+  const sw = 62, swGap = 14, perRow = 8;
+  playerColors.forEach((color, index) => {
+    const col = index % perRow;
+    const row = Math.floor(index / perRow);
+    const x = 90 + col * (sw + swGap);
+    const y = 240 + row * (sw + swGap);
+    const isUnlocked = isColorUnlocked(color);
+    const box = {
+      x: x, y: y, width: sw, height: sw,
+      buttonIndex: isUnlocked ? customizeButtonIndex : undefined,
+      action: 'color', value: color.value, unlocked: isUnlocked
     };
-    
-    if (isUnlocked) {
-      customizeButtonIndex++;
-    }
-    
-    // Draw background box (dimmed if locked)
-    ctx.fillStyle = isUnlocked ? '#333333' : '#222222';
-    ctx.fillRect(x, trailY, trailBoxSize, trailBoxSize);
-    
-    // Draw trail preview (only if unlocked)
-    if (isUnlocked) {
-      ctx.fillStyle = playerColor;
-      const centerX = x + trailBoxSize / 2;
-      const centerY = trailY + trailBoxSize / 2;
-      const boxSize = 25;
-      
-      if (trail.value === 'none') {
-        // Just the player box
-        ctx.fillRect(centerX - boxSize/2, centerY - boxSize/2, boxSize, boxSize);
-      } else if (trail.value === 'fade') {
-        // Fading squares
-        for (let i = 3; i >= 0; i--) {
-          const alpha = (i + 1) * 0.2;
-          const offset = (3 - i) * 8;
-          const trailColor = playerColor.replace('#', '');
-          const r = parseInt(trailColor.substr(0, 2), 16);
-          const g = parseInt(trailColor.substr(2, 2), 16);
-          const b = parseInt(trailColor.substr(4, 2), 16);
-          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-          ctx.fillRect(centerX - boxSize/2 - offset, centerY - boxSize/2, boxSize, boxSize);
-        }
-      } else if (trail.value === 'particles') {
-        // Main box
-        ctx.fillRect(centerX - boxSize/2, centerY - boxSize/2, boxSize, boxSize);
-        // Particle dots
-        const trailColor = playerColor.replace('#', '');
-        const r = parseInt(trailColor.substr(0, 2), 16);
-        const g = parseInt(trailColor.substr(2, 2), 16);
-        const b = parseInt(trailColor.substr(4, 2), 16);
-        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.6)`;
-        for (let i = 0; i < 8; i++) {
-          const particleX = centerX - 35 + Math.random() * 40;
-          const particleY = centerY - 10 + Math.random() * 20;
-          ctx.fillRect(particleX, particleY, 4, 4);
-        }
-      } else if (trail.value === 'dotted') {
-        // Main box
-        ctx.fillRect(centerX - boxSize/2, centerY - boxSize/2, boxSize, boxSize);
-        // Dotted trail - circular dots
-        const trailColor = playerColor.replace('#', '');
-        const r = parseInt(trailColor.substr(0, 2), 16);
-        const g = parseInt(trailColor.substr(2, 2), 16);
-        const b = parseInt(trailColor.substr(4, 2), 16);
-        for (let i = 0; i < 4; i++) {
-          const alpha = 0.6 - i * 0.12;
-          const offset = (i + 1) * 10;
-          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-          ctx.beginPath();
-          ctx.arc(centerX - offset, centerY, 5, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      } else if (trail.value === 'dash') {
-        // Dashed trail - rectangular segments with gaps
-        const trailColor = playerColor.replace('#', '');
-        const r = parseInt(trailColor.substr(0, 2), 16);
-        const g = parseInt(trailColor.substr(2, 2), 16);
-        const b = parseInt(trailColor.substr(4, 2), 16);
-        
-        // Draw main box
-        ctx.fillStyle = playerColor;
-        ctx.fillRect(centerX - boxSize/2, centerY - boxSize/2, boxSize, boxSize);
-        
-        // Draw dashed segments
-        for (let i = 0; i < 4; i++) {
-          // Alternate between drawing and skipping
-          if (i % 2 === 0) {
-            const alpha = 0.55 - i * 0.1;
-            const offset = (i + 1) * 10;
-            const dashSize = boxSize * 0.8;
-            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-            ctx.fillRect(centerX - dashSize/2 - offset, centerY - dashSize/2, dashSize, dashSize);
-          }
-        }
-      }
-    }
-    
-    // Lock icon for locked trails
+    if (isUnlocked) customizeButtonIndex++;
+    window.customizeButtons.push(box);
+
+    const appear = uiStagger(index, 0.025);
+    if (appear <= 0.001) return;
+    const selected = playerColor === color.value && isUnlocked;
+    const active = isUnlocked && isButtonHovered(box);
+
+    ctx.save();
+    ctx.globalAlpha = appear;
+    if (selected) { ctx.shadowColor = color.value; ctx.shadowBlur = 16; }
+    uiRoundRect(x, y, sw, sw, 9);
+    ctx.fillStyle = isUnlocked ? color.value : '#26232f';
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = selected ? '#ffffff' : (active ? '#c9c4da' : (isUnlocked ? 'rgba(0,0,0,0.35)' : '#332f42'));
+    ctx.lineWidth = selected ? 3 : 2;
+    ctx.stroke();
     if (!isUnlocked) {
-      ctx.fillStyle = '#555555';
-      ctx.font = '48px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('🔒', x + trailBoxSize / 2, trailY + trailBoxSize / 2 + 15);
+      ctx.font = '22px Arial, sans-serif';
+      ctx.fillText('\u{1F512}', x + sw / 2, y + sw / 2 + 8);
     }
-    
-    // Highlight selected or hovered (only if unlocked)
-    if (playerTrail === trail.value && isUnlocked) {
-      ctx.strokeStyle = '#ffff44';
-      ctx.lineWidth = 4;
-      ctx.strokeRect(x - 4, trailY - 4, trailBoxSize + 8, trailBoxSize + 8);
-    } else if (isButtonHovered(trailBox) && isUnlocked) {
-      ctx.strokeStyle = '#aaaaaa';
-      ctx.lineWidth = 3;
-      ctx.strokeRect(x - 2, trailY - 2, trailBoxSize + 4, trailBoxSize + 4);
-    } else {
-      ctx.strokeStyle = isUnlocked ? '#888888' : '#555555';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(x, trailY, trailBoxSize, trailBoxSize);
-    }
-    
-    // Trail name (dimmed if locked)
-    ctx.fillStyle = isUnlocked ? '#aaaaaa' : '#555555';
-    ctx.font = '18px monospace';
-    ctx.fillText(trail.name, x + trailBoxSize / 2, trailY + trailBoxSize + 20);
-    
-    window.customizeButtons.push({
-      ...trailBox,
-      action: 'trail',
-      value: trail.value,
-      unlocked: isUnlocked
-    });
+    ctx.restore();
   });
 
-  // Preview (moved lower)
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 36px Impact, monospace';
-  ctx.fillText('PREVIEW', canvas.width / 2, 570);
-  
-  const previewX = canvas.width / 2 - 50;
-  const previewY = 590;
-  
-  // Draw trail preview
-  if (playerTrail !== 'none') {
-    const mockTrail = [];
-    for (let i = 0; i < 8; i++) {
-      mockTrail.push({ x: previewX - i * 12, y: previewY, alpha: 1 - i * 0.12 });
+  const colorRows = Math.ceil(playerColors.length / perRow);
+  const trailTop = 240 + colorRows * (sw + swGap) + 34;
+
+  // ---- Trails ----
+  ctx.textAlign = 'left';
+  ctx.font = 'bold 20px Impact, monospace';
+  ctx.fillStyle = '#c9c4da';
+  ctx.fillText('TRAIL', 90, trailTop);
+
+  const tw = 112, th = 84, tGap = 12;
+  playerTrails.forEach((trail, index) => {
+    const x = 90 + index * (tw + tGap);
+    const y = trailTop + 18;
+    const isUnlocked = isTrailUnlocked(trail);
+    const box = {
+      x: x, y: y, width: tw, height: th,
+      buttonIndex: isUnlocked ? customizeButtonIndex : undefined,
+      action: 'trail', value: trail.value, unlocked: isUnlocked
+    };
+    if (isUnlocked) customizeButtonIndex++;
+    window.customizeButtons.push(box);
+
+    const appear = uiStagger(playerColors.length + index, 0.04);
+    if (appear <= 0.001) return;
+    const selected = playerTrail === trail.value && isUnlocked;
+    const active = isUnlocked && isButtonHovered(box);
+
+    ctx.save();
+    ctx.globalAlpha = appear;
+    if (selected) { ctx.shadowColor = '#ffcc44'; ctx.shadowBlur = 14; }
+    uiCard(x, y, tw, th, {
+      radius: 9,
+      fill: !isUnlocked ? 'rgba(22, 20, 30, 0.85)'
+           : (active || selected ? 'rgba(58, 50, 84, 0.95)' : 'rgba(33, 29, 46, 0.9)'),
+      border: selected ? '#ffcc44' : (!isUnlocked ? '#332f42' : (active ? '#c9c4da' : '#463f5c')),
+      lineWidth: selected ? 3 : 2
+    });
+    ctx.shadowBlur = 0;
+
+    if (isUnlocked) {
+      drawTrailPreview(trail.value, x + tw / 2 - 11, y + 22, 22);
+      ctx.fillStyle = playerColor;
+      uiRoundRect(x + tw / 2 - 11, y + 22, 22, 22, 4);
+      ctx.fill();
+    } else {
+      ctx.textAlign = 'center';
+      ctx.font = '22px Arial, sans-serif';
+      ctx.fillText('\u{1F512}', x + tw / 2, y + 40);
     }
-    
-    const savedTrail = trailHistory;
-    const savedPlayer = player;
-    trailHistory = mockTrail;
-    player = { x: previewX, y: previewY, width: 100, height: 100 };
-    drawPlayerTrail();
-    trailHistory = savedTrail;
-    player = savedPlayer;
-  }
-  
-  drawPlayer(previewX, previewY, 100, 100);
+    ctx.textAlign = 'center';
+    ctx.font = '13px Arial, sans-serif';
+    ctx.fillStyle = isUnlocked ? (selected ? '#ffcc44' : '#8a84a0') : '#55506b';
+    ctx.fillText(trail.name, x + tw / 2, y + th - 14);
+    ctx.restore();
+  });
 
-  // Back button (positioned like settings menu - bottom left)
-  const backX = 50;
-  const backY = canvas.height - 80;
-  const backBtn = { x: backX, y: backY, width: 120, height: 50, action: 'back' };
-  
-  ctx.fillStyle = isButtonHovered(backBtn) ? '#555555' : '#444444';
-  ctx.fillRect(backX, backY, 120, 50);
-  ctx.strokeStyle = isButtonHovered(backBtn) ? '#aaaaaa' : '#888888';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(backX, backY, 120, 50);
-  
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '24px monospace';
-  ctx.fillText('BACK', backX + 60, backY + 32);
-  
+  const backBtn = uiBackButton();
+  backBtn.action = 'back';
   window.customizeButtons.push(backBtn);
+  window.backButton = backBtn;
 
+  uiFooter('← →  navigate      ENTER  equip      ESC  back to menu');
   ctx.textAlign = 'left';
 }
 
@@ -3498,519 +4551,433 @@ function getChapterCompletion(chapterIndex) {
 }
 
 // Draw chapter selection screen
+function drawTrailPreview(trailValue, x, y, size) {
+  if (!trailValue || trailValue === 'none') return;
+  const rgb = hexToRgbParts(playerColor);
+  const drift = (Math.sin(uiTime * 3) + 1) * 2;
+
+  if (trailValue === 'fade') {
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = 'rgba(' + rgb + ', ' + (0.42 - i * 0.1).toFixed(2) + ')';
+      ctx.fillRect(x - (i + 1) * (size * 0.42) - drift, y, size, size);
+    }
+  } else if (trailValue === 'particles') {
+    for (let i = 0; i < 10; i++) {
+      const p = (i * 7919) % 100 / 100;
+      ctx.fillStyle = 'rgba(' + rgb + ', ' + (0.5 - p * 0.35).toFixed(2) + ')';
+      const px = x - 6 - p * size * 1.8 - drift;
+      const py = y + (((i * 37) % 20) / 20) * size;
+      ctx.fillRect(px, py, size * 0.22, size * 0.22);
+    }
+  } else if (trailValue === 'dotted') {
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = 'rgba(' + rgb + ', ' + (0.5 - i * 0.11).toFixed(2) + ')';
+      const d = size * 0.3;
+      ctx.fillRect(x - (i + 1) * (size * 0.5) - drift, y + size / 2 - d / 2, d, d);
+    }
+  } else if (trailValue === 'dash') {
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = 'rgba(' + rgb + ', ' + (0.5 - i * 0.11).toFixed(2) + ')';
+      ctx.fillRect(x - (i + 1) * (size * 0.55) - drift, y + size * 0.35, size * 0.42, size * 0.3);
+    }
+  }
+}
+
+function hexToRgbParts(hex) {
+  const h = hex.replace('#', '');
+  return parseInt(h.substr(0, 2), 16) + ', ' + parseInt(h.substr(2, 2), 16) + ', ' + parseInt(h.substr(4, 2), 16);
+}
+
+function getColorName(value) {
+  const found = playerColors.find(c => c.value === value);
+  return found ? found.name : value.toUpperCase();
+}
+
+function getTrailName(value) {
+  const found = playerTrails.find(t => t.value === value);
+  return found ? found.name : 'None';
+}
+
 function drawChapterSelect() {
-  // Use special background color in developer mode
-  ctx.fillStyle = DEVELOPER_MODE ? '#1a1a3a' : '#2a2a2a';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  drawUiBackground();
+  uiScreenHeader('SELECT CHAPTER', 'Three chapters, each one lying to you differently', '#9844ff');
 
-  // Title
-  ctx.fillStyle = '#9844ffff';
-  ctx.font = 'bold 72px Impact, monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText('SELECT CHAPTER', canvas.width / 2, 120);
-
-  // Chapter buttons
   window.chapterButtons = [];
-  
+
+  const cardW = 1020;
+  const cardH = 128;
+  const gap = 18;
+  const top = 196;
+
   for (let i = 0; i < chapters.length; i++) {
     const chapter = chapters[i];
-    const buttonWidth = 550;
-    const buttonHeight = 120;
-    const buttonX = canvas.width / 2 - buttonWidth / 2;
-    const buttonY = 220 + i * 140;
-    
-    const chapterBtn = {
-      x: buttonX,
-      y: buttonY,
-      width: buttonWidth,
-      height: buttonHeight,
+    const btn = {
+      x: 90,
+      y: top + i * (cardH + gap),
+      width: cardW,
+      height: cardH,
       chapter: i,
       buttonIndex: i
     };
-    
-    window.chapterButtons.push(chapterBtn);
-    
+    window.chapterButtons.push(btn);
+
+    const appear = uiStagger(i, 0.08);
+    if (appear <= 0.001) continue;
+
     const colors = getChapterColors(i);
     const completion = getChapterCompletion(i);
-    const isHovered = isButtonHovered(chapterBtn);
-    
-    // Draw button background with gradient
-    const gradient = ctx.createLinearGradient(buttonX, buttonY, buttonX, buttonY + buttonHeight);
-    gradient.addColorStop(0, isHovered ? '#4a4a4a' : '#3a3a3a');
-    gradient.addColorStop(1, isHovered ? '#555555' : '#444444');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
-    
-    // Colored left accent bar
-    ctx.fillStyle = colors.primary;
-    ctx.fillRect(buttonX, buttonY, 8, buttonHeight);
-    
-    // Border with chapter color when hovered
-    ctx.strokeStyle = isHovered ? colors.accent : '#888888';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
-    
-    // Chapter icon/number circle on the left
-    const iconX = buttonX + 45;
-    const iconY = buttonY + buttonHeight / 2;
-    const iconRadius = 30;
-    
-    ctx.fillStyle = colors.secondary;
-    ctx.beginPath();
-    ctx.arc(iconX, iconY, iconRadius, 0, Math.PI * 2);
+    const done = completion === 100;
+    const active = isButtonHovered(btn);
+    const accent = done ? '#55dd88' : colors.primary;
+
+    ctx.save();
+    ctx.globalAlpha = appear;
+    ctx.translate((1 - appear) * -30, 0);
+
+    if (active) { ctx.shadowColor = accent; ctx.shadowBlur = 18; }
+    uiCard(btn.x, btn.y, cardW, cardH, {
+      fill: active ? 'rgba(52, 45, 76, 0.95)' : 'rgba(30, 27, 42, 0.9)',
+      border: active ? accent : '#463f5c',
+      lineWidth: active ? 3 : 2
+    });
+    ctx.shadowBlur = 0;
+
+    // Accent tab down the left edge
+    ctx.fillStyle = accent;
+    uiRoundRect(btn.x + 8, btn.y + 14, 4, cardH - 28, 2);
     ctx.fill();
-    
-    ctx.strokeStyle = colors.accent;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 32px Impact, monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(i + 1, iconX, iconY + 10);
-    
-    // Chapter name and description
+
+    // Big chapter numeral
     ctx.textAlign = 'left';
-    ctx.fillStyle = colors.primary;
-    ctx.font = '26px Arial, sans-serif';
-    ctx.fillText(chapter.name.replace(`Chapter ${i + 1}: `, ''), buttonX + 90, buttonY + 35);
-    
-    ctx.fillStyle = '#cccccc';
-    ctx.font = '18px monospace';
-    ctx.fillText(chapter.description, buttonX + 90, buttonY + 60);
-    
-    // Completion percentage bar and text
-    const barWidth = 120;
-    const barHeight = 12;
-    const barX = buttonX + buttonWidth - barWidth - 20;
-    const barY = buttonY + buttonHeight - 30;
-    
-    // Background bar
-    ctx.fillStyle = '#222222';
-    ctx.fillRect(barX, barY, barWidth, barHeight);
-    
-    // Progress bar
-    ctx.fillStyle = completion === 100 ? '#44ff44' : colors.primary;
-    ctx.fillRect(barX, barY, (barWidth * completion) / 100, barHeight);
-    
-    // Bar border
-    ctx.strokeStyle = '#666666';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(barX, barY, barWidth, barHeight);
-    
-    // Completion text
-    ctx.fillStyle = completion === 100 ? '#44ff44' : '#ffffff';
-    ctx.font = 'bold 14px monospace';
-    ctx.textAlign = 'right';
-    ctx.fillText(`${Math.floor(completion)}%`, buttonX + buttonWidth - 150, buttonY + buttonHeight - 32);
-    
-    // Completion status icon
-    if (completion === 100) {
-      ctx.fillStyle = '#44ff44';
-      ctx.font = '24px monospace';
-      ctx.textAlign = 'right';
-      ctx.fillText('✓', buttonX + buttonWidth - 15, buttonY + 35);
+    ctx.font = 'bold 72px Impact, monospace';
+    ctx.fillStyle = active ? accent : '#4a4363';
+    ctx.fillText(i + 1, btn.x + 34, btn.y + 88);
+
+    // Name and description
+    ctx.font = '28px Arial, sans-serif';
+    ctx.fillStyle = active ? '#ffffff' : '#c9c4da';
+    ctx.fillText(chapter.name.replace('Chapter ' + (i + 1) + ': ', ''), btn.x + 120, btn.y + 52);
+
+    ctx.font = '16px Arial, sans-serif';
+    ctx.fillStyle = '#8a84a0';
+    ctx.fillText(chapter.description, btn.x + 120, btn.y + 80);
+
+    // Level dots, one per level, filled as they are completed
+    let completedCount = 0;
+    for (let l = 0; l < chapter.levels.length; l++) {
+      if (completedLevels.has(getGlobalLevelIndex(i, l))) completedCount++;
     }
+    const dotY = btn.y + 102;
+    for (let l = 0; l < chapter.levels.length; l++) {
+      const filled = completedLevels.has(getGlobalLevelIndex(i, l));
+      ctx.fillStyle = filled ? accent : '#3a3550';
+      uiRoundRect(btn.x + 120 + l * 15, dotY, 9, 9, 2);
+      ctx.fill();
+    }
+
+    // Progress on the right
+    const barW = 170;
+    const barX = btn.x + cardW - barW - 34;
+    ctx.textAlign = 'right';
+    ctx.font = 'bold 13px Arial, sans-serif';
+    ctx.fillStyle = '#8a84a0';
+    ctx.fillText(completedCount + ' / ' + chapter.levels.length + ' LEVELS', btn.x + cardW - 34, btn.y + 48);
+
+    const barY = btn.y + 62;
+    ctx.fillStyle = '#292437';
+    uiRoundRect(barX, barY, barW, 8, 4);
+    ctx.fill();
+    const fill = uiBarValue('chapter' + i, completion / 100);
+    if (fill > 0.004) {
+      ctx.fillStyle = accent;
+      uiRoundRect(barX, barY, Math.max(8, barW * fill), 8, 4);
+      ctx.fill();
+    }
+
+    ctx.textAlign = 'right';
+    ctx.font = 'bold 22px Impact, monospace';
+    ctx.fillStyle = done ? '#55dd88' : '#c9c4da';
+    ctx.fillText(done ? '✓  COMPLETE' : Math.floor(completion) + '%', btn.x + cardW - 34, btn.y + 100);
+
+    ctx.restore();
   }
 
-  // Back button
-  let backX = 50;
-  let backY = canvas.height - 100;
-  window.backButton = {
-    x: backX,
-    y: backY,
-    width: 120,
-    height: 50
-  };
-  
-  ctx.fillStyle = isButtonHovered(window.backButton) ? '#555555' : '#444444';
-  ctx.fillRect(backX, backY, 120, 50);
-  ctx.strokeStyle = isButtonHovered(window.backButton) ? '#aaaaaa' : '#888888';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(backX, backY, 120, 50);
-  
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '24px monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText('BACK', backX + 60, backY + 32);
-
-  // Instructions
-  ctx.fillStyle = '#666666';
-  ctx.font = '26px monospace';
-  ctx.fillText('ESC - Back to Menu', canvas.width / 2, canvas.height - 30);
-
+  window.backButton = uiBackButton();
+  uiFooter('↑ ↓  navigate      ENTER  select      ESC  back to menu');
   ctx.textAlign = 'left';
 }
 
 // Draw level selection screen
 function drawLevelSelect() {
-  // Use special background color in developer mode
-  ctx.fillStyle = DEVELOPER_MODE ? '#1a1a3a' : '#2a2a2a';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  // Get current chapter info
   const chapterInfo = getCurrentChapterInfo();
   if (!chapterInfo) {
-    // No valid chapter, go back to chapter select
     gameState = 'chapterSelect';
     return;
   }
 
-  // Title
-  ctx.fillStyle = '#9844ffff';
-  ctx.font = 'bold 48px monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText(`Chapter ${currentChapter + 1}: ${chapterInfo.name.replace(`Chapter ${currentChapter + 1}: `, '')}`, canvas.width / 2, 100);
-  
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 32px monospace';
-  ctx.fillText('SELECT LEVEL', canvas.width / 2, 140);
+  drawUiBackground();
+  const colors = getChapterColors(currentChapter);
+  uiScreenHeader(
+    chapterInfo.name.replace('Chapter ' + (currentChapter + 1) + ': ', '').toUpperCase(),
+    'Chapter ' + (currentChapter + 1) + '  ·  ' + chapterInfo.description,
+    colors.primary
+  );
 
-  // Level buttons (scaled to 90x90)
-  let y = 220;
-  let x = 0;
   window.levelButtons = [];
   let buttonIndexCounter = 0;
-  
-  for (let i = 0; i < chapterInfo.levels.length; i++) {
-    if(i == 5) {
-      y = 220 + 120;
-      x = 0;
-    }
 
-    let bx = canvas.width / 2 - 300 + x * 120;
-    let by = y - 52;
-    
-    // Check if level is unlocked
+  const tile = 104;
+  const gap = 20;
+  const perRow = 5;
+  const rows = Math.ceil(chapterInfo.levels.length / perRow);
+  const gridW = perRow * tile + (perRow - 1) * gap;
+  const gridX = GAME_WIDTH / 2 - gridW / 2;
+  const gridY = 210;
+
+  for (let i = 0; i < chapterInfo.levels.length; i++) {
+    const col = i % perRow;
+    const row = Math.floor(i / perRow);
+    const bx = gridX + col * (tile + gap);
+    const by = gridY + row * (tile + gap);
+
     const isUnlocked = isLevelUnlocked(currentChapter, i);
-    const isCompleted = completedLevels.has(getGlobalLevelIndex(currentChapter, i));
-    
+    const globalIndex = getGlobalLevelIndex(currentChapter, i);
+    const isCompleted = completedLevels.has(globalIndex);
+
     const levelBtn = {
-      x: bx,
-      y: by,
-      width: 90,
-      height: 90,
+      x: bx, y: by, width: tile, height: tile,
       levelInChapter: i,
       isUnlocked: isUnlocked,
       buttonIndex: isUnlocked ? buttonIndexCounter : undefined
     };
-    
-    if (isUnlocked) {
-      buttonIndexCounter++;
-    }
-    
+    if (isUnlocked) buttonIndexCounter++;
     window.levelButtons.push(levelBtn);
-    
-    // Draw button - darker if locked
-    if (isUnlocked) {
-      ctx.fillStyle = isButtonHovered(levelBtn) ? '#555555' : '#444444';
-    } else {
-      ctx.fillStyle = '#222222'; // Much darker for locked levels
-    }
-    ctx.fillRect(bx, by, 90, 90);
-    
-    // Border - different color for locked
-    if (isUnlocked) {
-      if (isCompleted) {
-        ctx.strokeStyle = '#44ff44'; // Green border if completed
-      } else {
-        ctx.strokeStyle = isButtonHovered(levelBtn) ? '#aaaaaa' : '#888888';
-      }
-    } else {
-      ctx.strokeStyle = '#444444'; // Dark border for locked
-    }
-    ctx.lineWidth = 4;
-    ctx.strokeRect(bx, by, 90, 90);
 
-    // Button text - grayed out if locked
-    if (isUnlocked) {
-      ctx.fillStyle = isCompleted ? '#44ff44' : '#ffffff';
-    } else {
-      ctx.fillStyle = '#555555'; // Very dark gray for locked
-    }
-    ctx.font = '36px monospace';
-    ctx.fillText(i+1, canvas.width / 2 - 255 + x * 120, y - 7);
+    const appear = uiStagger(i, 0.03);
+    if (appear <= 0.001) continue;
 
-    // Lock icon for locked levels
+    const active = isUnlocked && isButtonHovered(levelBtn);
+    const accent = isCompleted ? '#55dd88' : colors.primary;
+
+    ctx.save();
+    ctx.globalAlpha = appear;
+    ctx.translate(0, (1 - appear) * 18);
+
+    if (active) { ctx.shadowColor = accent; ctx.shadowBlur = 16; }
+    uiCard(bx, by, tile, tile, {
+      radius: 10,
+      fill: !isUnlocked ? 'rgba(22, 20, 30, 0.85)'
+           : (active ? 'rgba(58, 50, 84, 0.95)' : 'rgba(33, 29, 46, 0.9)'),
+      border: !isUnlocked ? '#332f42' : (active ? accent : (isCompleted ? 'rgba(85, 221, 136, 0.45)' : '#463f5c')),
+      lineWidth: active ? 3 : 2
+    });
+    ctx.shadowBlur = 0;
+
+    ctx.textAlign = 'center';
     if (!isUnlocked) {
-      ctx.fillStyle = '#555555';
-      ctx.font = '32px monospace';
-      ctx.fillText('🔒', canvas.width / 2 - 255 + x * 120, y + 23);
-    } else if (isCompleted) {
-      // Show star rating for completed levels
-      const globalIndex = getGlobalLevelIndex(currentChapter, i);
-      const stars = levelStars[globalIndex] || 0;
-      ctx.fillStyle = '#ffdd44';
-      ctx.font = '24px monospace';
-      const starText = '★'.repeat(stars) + '☆'.repeat(3 - stars);
-      ctx.fillText(starText, canvas.width / 2 - 255 + x * 120, y + 23);
+      ctx.font = '30px Arial, sans-serif';
+      ctx.fillText('\u{1F512}', bx + tile / 2, by + tile / 2 + 12);
     } else {
-      // Button hint for unlocked but not completed levels
-      ctx.fillStyle = '#888888';
-      ctx.font = '18px monospace';
-      if (i < 9) {
-        ctx.fillText(`Press ${i + 1}`, canvas.width / 2 - 255 + x * 120, y + 23);
+      ctx.font = 'bold 40px Impact, monospace';
+      ctx.fillStyle = isCompleted ? '#55dd88' : (active ? '#ffffff' : '#c9c4da');
+      ctx.fillText(i + 1, bx + tile / 2, by + 52);
+
+      if (isCompleted) {
+        uiStarRow(bx + tile / 2 - 25, by + 80, levelStars[globalIndex] || 0, 17);
       } else {
-        ctx.fillText(`Press 0`, canvas.width / 2 - 255 + x * 120, y + 23);
+        ctx.font = '12px monospace';
+        ctx.fillStyle = '#6d6786';
+        ctx.fillText('PRESS ' + (i < 9 ? i + 1 : 0), bx + tile / 2, by + 80);
       }
     }
-    
-    x++;
+    ctx.restore();
   }
 
-  // Bonus level button (if available and unlocked)
+  // Bonus level, off on its own below the grid
   if (chapterInfo.bonusLevel && isBonusLevelUnlocked(currentChapter)) {
-    let bonusX = canvas.width / 2 - 60; // Center position
-    let bonusY = y + 80; // Below the regular levels
-    
     const bonusGlobalIndex = getBonusLevelGlobalIndex(currentChapter);
     const isBonusCompleted = completedLevels.has(bonusGlobalIndex);
-    
+    const bw = 228;
     const bonusBtn = {
-      x: bonusX,
-      y: bonusY,
-      width: 90,
-      height: 90,
+      x: GAME_WIDTH / 2 - bw / 2,
+      y: gridY + rows * (tile + gap) + 18,
+      width: bw, height: 72,
       levelInChapter: -1,
       isUnlocked: true,
       isBonus: true,
       buttonIndex: buttonIndexCounter
     };
-    
     window.levelButtons.push(bonusBtn);
-    
-    // Draw bonus button - special gold color
-    if (isBonusCompleted) {
-      ctx.fillStyle = '#9900ffff';
-    } else {
-      ctx.fillStyle = isButtonHovered(bonusBtn) ? '#DAA520' : '#B8860B'; // Lighter gold on hover
-    }
-    ctx.fillRect(bonusX, bonusY, 90, 90);
-    
-    // Special border for bonus level
-    if (isBonusCompleted) {
-      ctx.strokeStyle = '#44ff44'; // Green if completed
-    } else {
-      ctx.strokeStyle = isButtonHovered(bonusBtn) ? '#FFB84D' : '#FFA500'; // Lighter orange on hover
-    }
-    ctx.lineWidth = 4;
-    ctx.strokeRect(bonusX, bonusY, 90, 90);
 
-    // Bonus level text
-    ctx.fillStyle = '#000000'; // Black text on gold background
-    ctx.font = 'bold 24px "Courier New", monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('BONUS', bonusX + 45, bonusY + 40);
-    
-    if (isBonusCompleted) {
-      // Show star rating for completed bonus level
-      const stars = levelStars[bonusGlobalIndex] || 0;
-      ctx.fillStyle = '#ffdd44';
-      ctx.font = '20px monospace';
-      const starText = '★'.repeat(stars) + '☆'.repeat(3 - stars);
-      ctx.fillText(starText, bonusX + 45, bonusY + 75);
-    } else {
-      // Button hint for bonus level
-      ctx.fillStyle = '#000000';
-      ctx.font = '18px monospace';
-      ctx.fillText('Press B', bonusX + 45, bonusY + 65);
+    const appear = uiStagger(chapterInfo.levels.length, 0.03);
+    if (appear > 0.001) {
+      const active = isButtonHovered(bonusBtn);
+      const accent = isBonusCompleted ? '#55dd88' : '#ffcc44';
+      ctx.save();
+      ctx.globalAlpha = appear;
+      if (active) { ctx.shadowColor = accent; ctx.shadowBlur = 18; }
+      uiCard(bonusBtn.x, bonusBtn.y, bw, 72, {
+        radius: 10,
+        fill: active ? 'rgba(70, 58, 30, 0.95)' : 'rgba(44, 37, 22, 0.9)',
+        border: active ? accent : 'rgba(255, 204, 68, 0.45)',
+        lineWidth: active ? 3 : 2
+      });
+      ctx.shadowBlur = 0;
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 26px Impact, monospace';
+      ctx.fillStyle = accent;
+      ctx.fillText('BONUS LEVEL', bonusBtn.x + bw / 2, bonusBtn.y + 32);
+      if (isBonusCompleted) {
+        uiStarRow(bonusBtn.x + bw / 2 - 25, bonusBtn.y + 56, levelStars[bonusGlobalIndex] || 0, 17);
+      } else {
+        ctx.font = '12px monospace';
+        ctx.fillStyle = '#9a8a5a';
+        ctx.fillText('PRESS B', bonusBtn.x + bw / 2, bonusBtn.y + 56);
+      }
+      ctx.restore();
     }
   }
 
-  // Back button
-  let backX = 50;
-  let backY = canvas.height - 100;
-  window.backButton = {
-    x: backX,
-    y: backY,
-    width: 120,
-    height: 50
-  };
-  
-  ctx.fillStyle = isButtonHovered(window.backButton) ? '#555555' : '#444444';
-  ctx.fillRect(backX, backY, 120, 50);
-  ctx.strokeStyle = isButtonHovered(window.backButton) ? '#aaaaaa' : '#888888';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(backX, backY, 120, 50);
-  
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '24px monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText('BACK', backX + 60, backY + 32);
-
-  // Instructions
-  ctx.fillStyle = '#666666';
-  ctx.font = '26px monospace';
-  ctx.fillText('ESC - Back to Chapters', canvas.width / 2, canvas.height - 30);
-
+  window.backButton = uiBackButton();
+  uiFooter('← →  navigate      ENTER  play      ESC  back to chapters');
   ctx.textAlign = 'left';
 }
 
 // Draw settings screen
 function drawSettings() {
-  // Use special background color in developer mode
-  ctx.fillStyle = DEVELOPER_MODE ? '#1a1a3a' : '#2a2a2a';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  drawUiBackground();
+  uiScreenHeader('SETTINGS', 'Audio and progress', '#55dd88');
 
-  // Title
-  ctx.fillStyle = '#9844ffff';
-  ctx.font = 'bold 72px Impact, monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText('SETTINGS', canvas.width / 2, 120);
-
-  // Audio settings
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '36px monospace';
-  ctx.fillText('AUDIO', canvas.width / 2, 200);
-
-  // Volume controls
-  const sliderWidth = 300;
-  const sliderHeight = 20;
-  const centerX = canvas.width / 2;
-  
-  // Master Volume
-  ctx.fillStyle = '#aaaaaa';
-  ctx.font = '24px monospace';
-  ctx.fillText('Master Volume', centerX - 150, 260);
-  
-  // Master volume slider background
-  ctx.fillStyle = '#444444';
-  ctx.fillRect(centerX - sliderWidth/2, 270, sliderWidth, sliderHeight);
-  
-  // Master volume slider fill
-  ctx.fillStyle = '#8c44ff';
-  ctx.fillRect(centerX - sliderWidth/2, 270, sliderWidth * masterVolume, sliderHeight);
-  
-  // Master volume value
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '20px monospace';
-  ctx.fillText(`${Math.round(masterVolume * 100)}%`, centerX + sliderWidth/2 + 20, 287);
-
-  // Music Volume
-  ctx.fillStyle = '#aaaaaa';
-  ctx.font = '24px monospace';
-  ctx.fillText('Music Volume', centerX - 150, 340);
-  
-  // Music volume slider background
-  ctx.fillStyle = '#444444';
-  ctx.fillRect(centerX - sliderWidth/2, 350, sliderWidth, sliderHeight);
-  
-  // Music volume slider fill
-  ctx.fillStyle = '#8c44ff';
-  ctx.fillRect(centerX - sliderWidth/2, 350, sliderWidth * musicVolume, sliderHeight);
-  
-  // Music volume value
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '20px monospace';
-  ctx.fillText(`${Math.round(musicVolume * 100)}%`, centerX + sliderWidth/2 + 20, 367);
-
-  // SFX Volume
-  ctx.fillStyle = '#aaaaaa';
-  ctx.font = '24px monospace';
-  ctx.fillText('SFX Volume', centerX - 150, 420);
-  
-  // SFX volume slider background
-  ctx.fillStyle = '#444444';
-  ctx.fillRect(centerX - sliderWidth/2, 430, sliderWidth, sliderHeight);
-  
-  // SFX volume slider fill
-  ctx.fillStyle = '#8c44ff';
-  ctx.fillRect(centerX - sliderWidth/2, 430, sliderWidth * sfxVolume, sliderHeight);
-  
-  // SFX volume value
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '20px monospace';
-  ctx.fillText(`${Math.round(sfxVolume * 100)}%`, centerX + sliderWidth/2 + 20, 447);
-
-  // Store slider positions for mouse interaction
-  window.volumeSliders = [
-    {
-      x: centerX - sliderWidth/2,
-      y: 270,
-      width: sliderWidth,
-      height: sliderHeight,
-      type: 'master'
-    },
-    {
-      x: centerX - sliderWidth/2,
-      y: 350,
-      width: sliderWidth,
-      height: sliderHeight,
-      type: 'music'
-    },
-    {
-      x: centerX - sliderWidth/2,
-      y: 430,
-      width: sliderWidth,
-      height: sliderHeight,
-      type: 'sfx'
-    }
-  ];
-
-  // Buttons for keyboard navigation
   window.settingsButtons = [];
 
-  // Back button
-  let backX = 50;
-  let backY = canvas.height - 100;
-  const backButton = {
-    x: backX,
-    y: backY,
-    width: 120,
-    height: 50,
-    action: 'back',
-    buttonIndex: 0
-  };
-  window.settingsButtons.push(backButton);
-  
-  ctx.fillStyle = isButtonHovered(backButton) ? '#555555' : '#444444';
-  ctx.fillRect(backX, backY, 120, 50);
-  ctx.strokeStyle = isButtonHovered(backButton) ? '#aaaaaa' : '#888888';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(backX, backY, 120, 50);
-  
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '24px monospace';
-  ctx.fillText('BACK', backX + 60, backY + 32);
-  
-  window.backButton = backButton;
+  const cardX = 90, cardY = 196, cardW = 620, cardH = 300;
+  uiCard(cardX, cardY, cardW, cardH, { scan: true });
 
-  // Reset Progress button
-  let resetX = canvas.width - 220;
-  let resetY = canvas.height - 100;
-  const resetButton = {
-    x: resetX,
-    y: resetY,
-    width: 200,
-    height: 50,
-    action: 'reset',
-    buttonIndex: 1
+  ctx.textAlign = 'left';
+  ctx.font = 'bold 22px Impact, monospace';
+  ctx.fillStyle = '#55dd88';
+  ctx.fillText('AUDIO', cardX + 30, cardY + 46);
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.fillRect(cardX + 30, cardY + 60, cardW - 60, 1);
+
+  // leave room on the right for the percentage, which the knob must never reach
+  const sliderW = 340;
+  const sliderX = cardX + 150;
+  const rows = [
+    { label: 'MASTER', value: masterVolume, type: 'master', y: cardY + 112 },
+    { label: 'MUSIC',  value: musicVolume,  type: 'music',  y: cardY + 182 },
+    { label: 'SFX',    value: sfxVolume,    type: 'sfx',    y: cardY + 252 }
+  ];
+
+  window.volumeSliders = rows.map(row => ({
+    x: sliderX, y: row.y - 9, width: sliderW, height: 18, type: row.type
+  }));
+
+  rows.forEach((row, i) => {
+    const appear = uiStagger(i, 0.08);
+    ctx.save();
+    ctx.globalAlpha = appear;
+
+    ctx.textAlign = 'left';
+    ctx.font = '15px Arial, sans-serif';
+    ctx.fillStyle = '#8a84a0';
+    ctx.fillText(row.label, cardX + 30, row.y + 5);
+
+    // Track
+    ctx.fillStyle = '#292437';
+    uiRoundRect(sliderX, row.y - 4, sliderW, 8, 4);
+    ctx.fill();
+    // Fill
+    ctx.fillStyle = '#55dd88';
+    uiRoundRect(sliderX, row.y - 4, Math.max(8, sliderW * row.value), 8, 4);
+    ctx.fill();
+    // Knob
+    const knobX = sliderX + sliderW * row.value;
+    const hovered = mouseX >= sliderX - 10 && mouseX <= sliderX + sliderW + 10 &&
+                    mouseY >= row.y - 14 && mouseY <= row.y + 14;
+    ctx.fillStyle = '#e8e4f5';
+    ctx.beginPath();
+    ctx.arc(knobX, row.y, hovered ? 10 : 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#55dd88';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.textAlign = 'right';
+    ctx.font = 'bold 15px Arial, sans-serif';
+    ctx.fillStyle = '#e8e4f5';
+    ctx.fillText(Math.round(row.value * 100) + '%', cardX + cardW - 30, row.y + 5);
+    ctx.restore();
+  });
+
+  // ---- Display card ----
+  const dY = cardY + cardH + 16, dH = 112;
+  uiCard(cardX, dY, cardW, dH, {});
+  ctx.textAlign = 'left';
+  ctx.font = 'bold 22px Impact, monospace';
+  ctx.fillStyle = '#44ddcc';
+  ctx.fillText('DISPLAY', cardX + 30, dY + 38);
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.fillRect(cardX + 30, dY + 52, cardW - 60, 1);
+
+  const fullscreenOn = isFullscreenActive();
+  const fullscreenButton = {
+    x: cardX + 30, y: dY + 64, width: 260, height: 44, action: 'fullscreen'
   };
-  window.settingsButtons.push(resetButton);
-  
-  ctx.fillStyle = isButtonHovered(resetButton) ? '#664444' : '#553333';
-  ctx.fillRect(resetX, resetY, 200, 50);
-  ctx.strokeStyle = isButtonHovered(resetButton) ? '#aa6666' : '#886666';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(resetX, resetY, 200, 50);
-  
-  ctx.fillStyle = '#ff8888';
-  ctx.font = '20px monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText('RESET PROGRESS', resetX + 100, resetY + 32);
-  
+  uiActionButton(fullscreenButton, fullscreenOn ? 'FULLSCREEN  ON' : 'FULLSCREEN  OFF', {
+    font: '16px Arial, sans-serif', center: true, tab: false,
+    accent: '#44ddcc', textColor: fullscreenOn ? '#9ff5ea' : '#c9c4da'
+  });
+  window.fullscreenButton = fullscreenButton;
+
+  ctx.textAlign = 'left';
+  ctx.font = '14px monospace';
+  ctx.fillStyle = '#6d6688';
+  ctx.fillText('F  toggles fullscreen any time', cardX + 310, dY + 84);
+  ctx.fillText('ESC  leaves it', cardX + 310, dY + 102);
+
+  // ---- Progress card ----
+  const pX = 750, pW = 360;
+  uiCard(pX, cardY, pW, cardH, {});
+  ctx.textAlign = 'left';
+  ctx.font = 'bold 22px Impact, monospace';
+  ctx.fillStyle = '#ff8a8a';
+  ctx.fillText('PROGRESS', pX + 26, cardY + 46);
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.fillRect(pX + 26, cardY + 60, pW - 52, 1);
+
+  const progress = getEditorUnlockProgress();
+  let cursor = cardY + 100;
+  cursor = uiStat(pX + 26, cursor, pW - 52, 'LEVELS COMPLETED',
+                  progress.completed + ' / ' + progress.totalLevels,
+                  progress.completed / progress.totalLevels, '#44aaff', 'set-levels') + 38;
+  cursor = uiStat(pX + 26, cursor, pW - 52, 'STARS EARNED',
+                  progress.stars + ' / ' + progress.maxStars,
+                  progress.stars / progress.maxStars, '#ffcc44', 'set-stars') + 44;
+
+  const resetButton = {
+    x: pX + 26, y: cursor, width: pW - 52, height: 46,
+    action: 'reset', buttonIndex: 1
+  };
+  uiActionButton(resetButton, 'RESET PROGRESS', {
+    font: '16px Arial, sans-serif', center: true, tab: false, danger: true,
+    accent: '#ff6b6b', textColor: '#ff9a9a'
+  });
   window.resetButton = resetButton;
 
-  // Instructions
-  ctx.fillStyle = '#666666';
-  ctx.font = '20px monospace';
-  ctx.fillText('ESC - Back to Menu  |  Click and drag sliders to adjust volume', canvas.width / 2, canvas.height - 30);
+  const backBtn = uiBackButton();
+  backBtn.buttonIndex = 0;
+  window.settingsButtons.push(backBtn, fullscreenButton, resetButton);
+  window.backButton = backBtn;
 
+  uiFooter('Drag the sliders to set volume      F  fullscreen      ESC  back');
   ctx.textAlign = 'left';
 }
 
 // Game loop
 function gameLoop(currentTime = 0) {
+  pollFullscreenState(); // In case the browser changed it without telling us
+
   if (isPaused) {
     requestAnimationFrame(gameLoop);
     return;
@@ -4029,11 +4996,9 @@ function gameLoop(currentTime = 0) {
 
 // Handle mouse clicks on buttons
 function handleClick(event) {
-  const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-  const x = (event.clientX - rect.left) * scaleX;
-  const y = (event.clientY - rect.top) * scaleY;
+  const point = canvasPointFromEvent(event);
+  const x = point.x;
+  const y = point.y;
 
   // Check menu buttons
   if (gameState === 'menu' && window.menuButtons) {
@@ -4048,9 +5013,17 @@ function handleClick(event) {
         } else if (button.action === 'customize') {
           previousGameState = gameState;
           transitionToState('customize');
+        } else if (button.action === 'levelEditor') {
+          tryOpenLevelEditor();
         }
       }
     });
+  }
+
+  // My Levels browser (level editor hub)
+  if (gameState === 'customLevels') {
+    handleCustomLevelClick(x, y);
+    return;
   }
 
   // Check customization buttons
@@ -4082,6 +5055,15 @@ function handleClick(event) {
       transitionToState(previousGameState || 'menu');
     }
     
+    // Check the fullscreen toggle
+    if (window.fullscreenButton) {
+      const fsBtn = window.fullscreenButton;
+      if (x >= fsBtn.x && x <= fsBtn.x + fsBtn.width &&
+          y >= fsBtn.y && y <= fsBtn.y + fsBtn.height) {
+        toggleFullscreen();
+      }
+    }
+
     // Check reset button
     if (window.resetButton) {
       const resetBtn = window.resetButton;
@@ -4152,13 +5134,20 @@ function handleClick(event) {
         if (button.action === 'resume') {
           gameState = 'playing';
         } else if (button.action === 'restart') {
-          loadLevel(currentLevel);
-          gameState = 'playing';
+          if (customLevelSession) {
+            restartCustomLevelSession();
+          } else {
+            loadLevel(currentLevel);
+            gameState = 'playing';
+          }
+        } else if (button.action === 'fullscreen') {
+          toggleFullscreen();
         } else if (button.action === 'settings') {
           previousGameState = 'playing'; // Return to playing after settings
           transitionToState('settings');
         } else if (button.action === 'quit') {
-          transitionToState('menu');
+          if (customLevelSession) endCustomLevelSession();
+          else transitionToState('menu');
         }
       }
     });
@@ -4169,6 +5158,16 @@ function handleClick(event) {
 window.addEventListener('keydown', (e) => {
   // Enable audio on any key press
   tryEnableAudio();
+
+  // The level editor screens handle their own keys (see src/editor/)
+  if (gameState === 'editor' || gameState === 'customLevels') return;
+
+  // F: fullscreen, from anywhere
+  if (e.code === 'KeyF' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    toggleFullscreen();
+    return;
+  }
 
   // Track keypresses for cheat code (only letters)
   if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) {
@@ -4256,6 +5255,8 @@ window.addEventListener('keydown', (e) => {
           } else if (button.action === 'customize') {
             previousGameState = gameState;
             transitionToState('customize');
+          } else if (button.action === 'levelEditor') {
+            tryOpenLevelEditor();
           }
         }
         
@@ -4291,13 +5292,20 @@ window.addEventListener('keydown', (e) => {
           if (button.action === 'resume') {
             gameState = 'playing';
           } else if (button.action === 'restart') {
-            loadLevel(currentLevel);
-            gameState = 'playing';
+            if (customLevelSession) {
+              restartCustomLevelSession();
+            } else {
+              loadLevel(currentLevel);
+              gameState = 'playing';
+            }
+          } else if (button.action === 'fullscreen') {
+            toggleFullscreen();
           } else if (button.action === 'settings') {
             previousGameState = 'playing';
             transitionToState('settings');
           } else if (button.action === 'quit') {
-            transitionToState('menu');
+            if (customLevelSession) endCustomLevelSession();
+            else transitionToState('menu');
           }
         }
         
@@ -4307,6 +5315,8 @@ window.addEventListener('keydown', (e) => {
             if (confirm('Are you sure you want to reset all progress? This cannot be undone!')) {
               resetProgress();
             }
+          } else if (button.action === 'fullscreen') {
+            toggleFullscreen();
           }
         }
       }
@@ -4327,6 +5337,15 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.code === 'KeyR') {
     keys.r = true;
+    // Quick restart of the current level
+    if (gameState === 'playing') {
+      if (customLevelSession) {
+        restartCustomLevelSession();
+      } else {
+        loadLevel(currentLevel);
+        gameState = 'playing';
+      }
+    }
   }
 
   // Debug mode toggle
@@ -4408,7 +5427,12 @@ window.addEventListener('keydown', (e) => {
   // ESC key handling for different states
   if (e.code === 'Escape') {
     if (gameState === 'playing') {
-      gameState = 'paused';
+      // Testing from the editor: go straight back to building
+      if (customLevelSession && customLevelSession.returnState === 'editor') {
+        endCustomLevelSession();
+      } else {
+        gameState = 'paused';
+      }
     } else if (gameState === 'paused') {
       gameState = 'playing';
     } else if (gameState === 'settings') {
@@ -4443,11 +5467,9 @@ canvas.addEventListener('click', handleClick);
 
 // Mouse move handler for hover effects
 canvas.addEventListener('mousemove', (e) => {
-  const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-  mouseX = (e.clientX - rect.left) * scaleX;
-  mouseY = (e.clientY - rect.top) * scaleY;
+  const point = canvasPointFromEvent(e);
+  mouseX = point.x;
+  mouseY = point.y;
 });
 
 // Volume slider drag handling
@@ -4457,10 +5479,10 @@ let activeSlider = null;
 canvas.addEventListener('mousedown', (e) => {
   if (gameState !== 'settings' || !window.volumeSliders) return;
   
-  const rect = canvas.getBoundingClientRect();
-  const x = (e.clientX - rect.left) * (canvas.width / rect.width);
-  const y = (e.clientY - rect.top) * (canvas.height / rect.height);
-  
+  const point = canvasPointFromEvent(e);
+  const x = point.x;
+  const y = point.y;
+
   // Check if clicking on a slider
   window.volumeSliders.forEach(slider => {
     if (x >= slider.x && x <= slider.x + slider.width &&
@@ -4482,15 +5504,13 @@ canvas.addEventListener('mousedown', (e) => {
 });
 
 canvas.addEventListener('mousemove', (e) => {
-  const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-  mouseX = (e.clientX - rect.left) * scaleX;
-  mouseY = (e.clientY - rect.top) * scaleY;
-  
+  const point = canvasPointFromEvent(e);
+  mouseX = point.x;
+  mouseY = point.y;
+
   // Handle slider dragging
   if (isDraggingSlider && activeSlider) {
-    const x = (e.clientX - rect.left) * scaleX;
+    const x = point.x;
     
     const value = Math.max(0, Math.min(1, (x - activeSlider.x) / activeSlider.width));
     if (activeSlider.type === 'master') {
