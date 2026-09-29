@@ -24,7 +24,12 @@ const WINDOWED_CHROME_FALLBACK = 300;
 const WINDOWED_SIDE_MARGIN = 24;
 // Past three times the game's own resolution the extra pixels cost more than
 // they show, even on a 5K screen.
-const MAX_BACKING_SCALE = 3;
+// Phones and tablets draw at the game's own resolution at most: their screens
+// have many pixels but little power to fill them.
+const IS_TOUCH_DEVICE = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+const MAX_BACKING_SCALE = IS_TOUCH_DEVICE ? 1 : 3;
+// Longest time the game simulates in one step (see gameLoop)
+const MAX_STEP = 1 / 60;
 const DISPLAY_SETTINGS_KEY = 'disbelieveDisplay';
 
 const gameStage = document.getElementById('gameStage');
@@ -4983,11 +4988,18 @@ function gameLoop(currentTime = 0) {
     return;
   }
 
-  // Calculate delta time
-  const deltaTime = (currentTime - lastTime) / 1000;
+  // Calculate delta time. A slow frame (common on phones) is simulated in
+  // steps of at most 1/60 s, so the player can't jump through a platform or
+  // jump higher just because a frame came late; a long stall (tab switch)
+  // counts as 0.1 s at most.
+  let deltaTime = Math.min((currentTime - lastTime) / 1000, 0.1);
   lastTime = currentTime;
 
   // Update and render
+  while (deltaTime > MAX_STEP) {
+    update(MAX_STEP);
+    deltaTime -= MAX_STEP;
+  }
   update(deltaTime);
   render();
 

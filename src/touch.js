@@ -72,6 +72,11 @@
     if (touchMode) return;
     touchMode = true;
     document.body.classList.add('touch');
+    // Glow (shadowBlur) is by far the most expensive thing the game draws, and
+    // on a phone it makes the frame rate drop: draw without it.
+    try {
+      Object.defineProperty(ctx, 'shadowBlur', { get() { return 0; }, set() { }, configurable: true });
+    } catch (x) { }
     // The keyboard help above the game is hidden now: give its room to the game
     window.dispatchEvent(new Event('resize'));
   }
