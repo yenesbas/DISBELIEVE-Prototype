@@ -429,9 +429,45 @@ function pauseMusic() {
   try { sounds.music.pause(); } catch (e) {}
 }
 
+// Sound effects through the Web Audio API: each one is decoded once and then
+// started without seeking an <audio> element back to its start, which on
+// phones stalls the game for a moment on every jump and spike. Where that
+// can't load (opened as a file, old browser) the <audio> elements play instead.
+const SFX_NAMES = ['jump', 'spike', 'level_end', 'chapter_end', 'death'];
+const sfxBuffers = {};
+let audioCtx = null;
+(function loadSfxBuffers() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC || location.protocol === 'file:') return;
+  try { audioCtx = new AC(); } catch (e) { return; }
+  SFX_NAMES.forEach(name => {
+    fetch(sounds[name].src)
+      .then(r => r.arrayBuffer())
+      .then(data => new Promise((ok, fail) => audioCtx.decodeAudioData(data, ok, fail)))
+      .then(buffer => { sfxBuffers[name] = buffer; })
+      .catch(() => { /* stays on the <audio> element */ });
+  });
+})();
+
+function playSfxBuffer(soundName) {
+  const buffer = sfxBuffers[soundName];
+  if (!buffer || !audioCtx || audioCtx.state !== 'running') return false;
+  const source = audioCtx.createBufferSource();
+  source.buffer = buffer;
+  const gain = audioCtx.createGain();
+  gain.gain.value = masterVolume * sfxVolume;
+  source.connect(gain);
+  gain.connect(audioCtx.destination);
+  source.start(0);
+  return true;
+}
+
 // Try to enable audio on first user interaction (helps with autoplay restrictions)
 let audioEnabled = false;
 function tryEnableAudio() {
+  // The audio context may only start from a tap or key, and phones suspend it
+  // again in the background: resume it on every one.
+  if (audioCtx && audioCtx.state !== 'running') audioCtx.resume().catch(() => {});
   if (audioEnabled) return;
   audioEnabled = true;
   updateVolumes();
@@ -446,6 +482,7 @@ function playSound(soundName) {
   try {
     // SFX should respect master * sfxVolume
     if (soundName !== 'music') {
+      if (playSfxBuffer(soundName)) return;
       sound.volume = masterVolume * sfxVolume;
       sound.currentTime = 0; // reset
       sound.play().catch(err => {
