@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Disbelieve Prototype</title>
     <style>
         body {
@@ -81,6 +81,39 @@
         }
         #levelName { color: #aaa; }
         #deathCount { color: #ff4444; }
+
+        /* On-screen controls (src/touch.js): only on touch screens */
+        #touchControls { display: none; }
+        body.touch #touchControls { display: block; }
+        body.touch #instructions { display: none; }
+        body.touch { padding: 0; }
+        body.touch canvas { touch-action: none; }
+        body.touch, body.touch * {
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .touchButton {
+            position: fixed;
+            z-index: 10;
+            width: 72px;
+            height: 72px;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.35);
+            background: rgba(255, 255, 255, 0.12);
+            color: rgba(255, 255, 255, 0.8);
+            font: bold 26px Arial, sans-serif;
+            padding: 0;
+            touch-action: none;
+        }
+        .touchButton.down { background: rgba(255, 255, 255, 0.35); }
+        #touchLeft    { left:  calc(16px + env(safe-area-inset-left, 0px));  bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+        #touchRight   { left:  calc(104px + env(safe-area-inset-left, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+        #touchJump    { right: calc(16px + env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); width: 88px; height: 88px; }
+        #touchRestart, #touchBack { width: 48px; height: 48px; font-size: 18px; top: calc(12px + env(safe-area-inset-top, 0px)); }
+        #touchBack    { left:  calc(12px + env(safe-area-inset-left, 0px)); }
+        #touchRestart { right: calc(12px + env(safe-area-inset-right, 0px)); }
     </style>
 </head>
 <body>
@@ -113,6 +146,9 @@
     <script src="src/editor/level_storage.js"></script>
     <script src="src/editor/editor.js"></script>
     <script src="src/editor/custom_levels.js"></script>
+
+    <!-- On-screen controls for phones and tablets -->
+    <script src="src/touch.js"></script>
 </body>
 </html>
 
