@@ -2,32 +2,29 @@
  * CUSTOM_LEVELS.JS - "My Levels" screen and playing player-made levels
  *
  * This is the hub between the editor and the game: it lists everything the
- * player has built, and it starts / ends a custom play session.
+ * player has built, shares and loads levels, and it starts / ends a custom
+ * play session (the level itself runs in level_play.js).
  */
 
 // ===== PLAY SESSIONS =====
 
-// Start playing a stored custom level. returnState is where ESC / finishing
-// the level takes the player back to ('customLevels' or 'editor').
-function startCustomLevelSession(level, returnState) {
+// Start playing a stored custom level (a record: { id, level }). returnState is where ESC / finishing the level takes
+// the player back to ('customLevels', 'editor', or 'menu' for a level opened from a link).
+function startCustomLevelSession(rec, returnState) {
+  const level = Object.assign({ id: rec.id || '★' }, rec.level);
   customLevelSession = {
-    id: level.id || null,
+    id: rec.id || null,
     returnState: returnState || 'customLevels',
-    data: customLevelToPlayable(level),
+    data: { name: level.name },
     // A stand-in "chapter" so the engine can read the visual style
-    chapter: {
-      name: 'Custom Levels',
-      visualStyle: level.visualStyle || 'default',
-      levels: []
-    }
+    chapter: { name: 'Custom Levels', visualStyle: LK_LOOK[level.style] || 'default', levels: [] }
   };
 
   levelDeaths = 0;
   levelTime = 0;
-  parseLevel();
-  resetPlayer();
+  startLevelPlay(level);
 
-  if (returnState !== 'editor' && level.id) recordCustomLevelPlay(level.id);
+  if (returnState !== 'editor' && rec.id) recordCustomLevelPlay(rec.id);
 
   updateStats();
   transitionToState('playing');
@@ -35,10 +32,7 @@ function startCustomLevelSession(level, returnState) {
 
 function restartCustomLevelSession() {
   if (!customLevelSession) return;
-  levelDeaths = 0;
-  levelTime = 0;
-  parseLevel();
-  resetPlayer();
+  restartLevelPlay();
   gameState = 'playing';
 }
 
@@ -49,8 +43,10 @@ function endCustomLevelSession() {
 
 // Called by the engine right after a state transition finishes.
 function onGameStateEntered(state) {
-  if (state !== 'playing' && state !== 'paused' && state !== 'levelComplete') {
+  // (SETTINGS opened from the pause menu goes back to the level)
+  if (state !== 'playing' && state !== 'paused' && state !== 'levelComplete' && state !== 'settings') {
     customLevelSession = null;
+    LKP = null;
   }
   if (state === 'customLevels') refreshCustomLevelBrowser();
 
@@ -62,7 +58,7 @@ function onGameStateEntered(state) {
   }
 }
 
-// Small banner while a custom level is running
+// Small banner while a custom level is running, in the strip over it
 function drawCustomSessionOverlay() {
   if (!customLevelSession) return;
   const testing = customLevelSession.returnState === 'editor';
@@ -77,30 +73,57 @@ function drawCustomSessionOverlay() {
   const x = GAME_WIDTH / 2 - width / 2;
 
   // Rounded pill in the shared menu style, with a soft accent glow
-  if (typeof uiRoundRect === 'function') {
-    ctx.save();
-    ctx.shadowColor = accent;
-    ctx.shadowBlur = 12;
-    uiRoundRect(x, 10, width, 30, 15);
-    ctx.fillStyle = 'rgba(18, 16, 27, 0.9)';
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = accent;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.restore();
-  } else {
-    ctx.fillStyle = 'rgba(18, 16, 27, 0.9)';
-    ctx.fillRect(x, 10, width, 30);
-    ctx.strokeStyle = accent;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x + 0.5, 10.5, width - 1, 29);
-  }
+  ctx.save();
+  ctx.shadowColor = accent;
+  ctx.shadowBlur = 12;
+  uiRoundRect(x, 8, width, 30, 15);
+  ctx.fillStyle = 'rgba(18, 16, 27, 0.9)';
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
 
   ctx.fillStyle = accent;
   ctx.textAlign = 'center';
-  ctx.fillText(text, GAME_WIDTH / 2, 30);
+  ctx.fillText(text, GAME_WIDTH / 2, 28);
   ctx.textAlign = 'left';
+}
+
+// ===== SHARING =====
+
+// Puts a share code or link on the clipboard; where that is not allowed, shows it to copy by hand. done(copied)
+function copyShareText(text, done) {
+  const show = () => { window.prompt('Copy this and send it to a friend:', text); if (done) done(false); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => { if (done) done(true); }, show);
+  } else {
+    show();
+  }
+}
+
+// A code or link pasted in: saved as a new level.
+function promptLoadLevelCode() {
+  const text = window.prompt('Paste a share code or link.\nCodes from the full game work too.', '');
+  if (!text) return;
+  const rec = importCustomLevelCode(text);
+  if (!rec) { alert('That code could not be read. Check that you pasted the whole code or link.'); return; }
+  refreshCustomLevelBrowser();
+  customLevelPage = 0;
+  customLevelNotice('Loaded "' + rec.level.name + '"');
+}
+
+// A link with #lvl=... in it opens straight into its level, which is kept in My Levels too.
+function openSharedLevelFromLink() {
+  if (!location.hash.includes('lvl=')) return;
+  const level = LK.decodeLevel(location.hash);
+  if (!level) return;
+  delete level.id;
+  const code = LK.encodeLevel(level);
+  let rec = loadCustomLevels().find(other => LK.encodeLevel(other.level) === code);
+  if (!rec) rec = addCustomLevel(level);
+  if (rec) startCustomLevelSession(rec, 'menu');
 }
 
 // ===== "MY LEVELS" BROWSER =====
@@ -115,6 +138,13 @@ let customLevelList = [];
 let customLevelPage = 0;
 let customLevelButtons = [];
 let customLevelHint = '';
+let customLevelNoticeText = '';
+let customLevelNoticeUntil = 0;
+
+function customLevelNotice(text) {
+  customLevelNoticeText = text;
+  customLevelNoticeUntil = performance.now() + 3500;
+}
 
 function refreshCustomLevelBrowser() {
   customLevelList = loadCustomLevels().sort((a, b) => b.modified - a.modified);
@@ -133,34 +163,37 @@ function buildCustomLevelLayout() {
   const push = (id, x, y, w, h, extra) => b.push(Object.assign({ id, x, y, w, h }, extra || {}));
 
   push('back', 30, 26, 110, 40);
-  push('new', 620, 26, 190, 40);
-  push('import', 820, 26, 160, 40);
+  push('new', 500, 26, 170, 40);
+  push('code', 678, 26, 146, 40);
+  push('import', 832, 26, 150, 40);
   push('exportAll', 990, 26, 180, 40);
 
   const pageLevels = customLevelList.slice(customLevelPage * CL_PER_PAGE, customLevelPage * CL_PER_PAGE + CL_PER_PAGE);
 
-  pageLevels.forEach((level, i) => {
+  pageLevels.forEach((rec, i) => {
     const col = i % CL_COLS;
     const row = Math.floor(i / CL_COLS);
     const x = 60 + col * (CL_CARD_W + 30);
-    const y = 140 + row * (CL_CARD_H + 20);
+    const y = 130 + row * (CL_CARD_H + 20);
 
-    push('play:' + level.id, x + 10, y + 186, 96, 34, { level });
-    push('edit:' + level.id, x + 112, y + 186, 84, 34, { level });
-    push('copy:' + level.id, x + 202, y + 186, 34, 34, { level });
-    push('export:' + level.id, x + 240, y + 186, 34, 34, { level });
-    push('delete:' + level.id, x + 278, y + 186, 34, 34, { level });
-    push('card:' + level.id, x, y, CL_CARD_W, 180, { level, isCard: true });
+    push('play:' + rec.id, x + 10, y + 188, 80, 32, { rec });
+    push('edit:' + rec.id, x + 96, y + 188, 60, 32, { rec });
+    push('share:' + rec.id, x + 162, y + 188, 64, 32, { rec });
+    push('copy:' + rec.id, x + 232, y + 188, 32, 32, { rec });
+    push('export:' + rec.id, x + 268, y + 188, 32, 32, { rec });
+    push('delete:' + rec.id, x + 304, y + 188, 32, 32, { rec });
+    push('card:' + rec.id, x, y, CL_CARD_W, 180, { rec, isCard: true });
   });
 
   if (customLevelList.length > CL_PER_PAGE) {
-    push('prevPage', 480, 648, 60, 34);
-    push('nextPage', 660, 648, 60, 34);
+    push('prevPage', 480, 638, 60, 34);
+    push('nextPage', 660, 638, 60, 34);
   }
 
   if (customLevelList.length === 0) {
     push('createFirst', GAME_WIDTH / 2 - 170, 370, 340, 56);
-    push('importFirst', GAME_WIDTH / 2 - 110, 442, 220, 44);
+    push('importFirst', GAME_WIDTH / 2 - 160, 442, 150, 44);
+    push('codeFirst', GAME_WIDTH / 2 + 10, 442, 150, 44);
   }
 
   customLevelButtons = b;
@@ -175,57 +208,36 @@ function clButtonAt(x, y) {
   return null;
 }
 
-// Tiny map preview drawn with flat colours - readable at thumbnail size.
+// Tiny map preview drawn with flat colours - readable at thumbnail size. Fakes look like ground and invisible blocks
+// are faint, as in the game: a thumbnail gives nothing away.
+const CL_THUMB_BG = { gray: '#141418', neon: '#0a0c2c', paper: '#f5f5dc' };
+const CL_THUMB_SOLID = { gray: '#50505c', neon: '#2b6cff', paper: '#3a3a3a' };
 function drawLevelThumbnail(level, x, y, w, h) {
+  const style = LK.LEVEL_STYLES.includes(level.style) ? level.style : 'neon';
+  const tile = Math.min(w / EDITOR_COLS, h / EDITOR_ROWS);
+  const ox = x + (w - EDITOR_COLS * tile) / 2;
+  const oy = y + (h - EDITOR_ROWS * tile) / 2;
+  const solid = CL_THUMB_SOLID[style];
+  const colors = {
+    '#': solid, F: solid, I: 'rgba(68,221,255,.25)', C: '#8a6a4a', '^': '#ff3355', '>': '#ff3355', 'v': '#ff3355', '<': '#ff3355',
+    u: 'rgba(68,221,255,.6)', d: 'rgba(255,68,221,.6)', P: '#44aaff', D: '#33ee77', X: '#33ee77'
+  };
+
   ctx.fillStyle = '#15151c';
   ctx.fillRect(x, y, w, h);
-
-  const scale = Math.min(w / (EDITOR_COLS * TILE_SIZE), h / (EDITOR_ROWS * TILE_SIZE));
-  const tile = TILE_SIZE * scale;
-  const offsetX = x + (w - EDITOR_COLS * tile) / 2;
-  const offsetY = y + (h - EDITOR_ROWS * tile) / 2;
-
-  const map = level.map;
-  for (let r = 0; r < map.length; r++) {
-    for (let c = 0; c < map[r].length; c++) {
-      const char = map[r][c];
-      if (char === '.') continue;
-      const tx = offsetX + c * tile;
-      const ty = offsetY + r * tile;
-
-      if (char === '#') {
-        ctx.fillStyle = '#7a7a86';
-        ctx.fillRect(tx, ty, tile, tile);
-      } else if (char === 'F') {
-        ctx.fillStyle = 'rgba(255, 102, 204, 0.55)';
-        ctx.fillRect(tx, ty, tile, tile);
-      } else if (char === 'I') {
-        ctx.strokeStyle = 'rgba(68, 221, 221, 0.7)';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(tx + 0.5, ty + 0.5, tile - 1, tile - 1);
-      } else if (char === 'E') {
-        ctx.fillStyle = '#8a6a3a';
-        ctx.fillRect(tx, ty, tile, tile);
-      } else if (char === 'G' || char === 'g') {
-        ctx.fillStyle = 'rgba(140, 102, 255, 0.45)';
-        ctx.fillRect(tx, ty, tile, tile);
-      } else if (char === 'S') {
-        ctx.fillStyle = '#44aaff';
-        ctx.fillRect(tx + tile * 0.15, ty + tile * 0.15, tile * 0.7, tile * 0.7);
-      } else if (char === 'D') {
-        ctx.fillStyle = '#44ff88';
-        ctx.fillRect(tx + tile * 0.1, ty + tile * 0.05, tile * 0.8, tile * 0.9);
-      } else if (/[0-9^]/.test(char)) {
-        ctx.fillStyle = '#ff4455';
-        ctx.beginPath();
-        ctx.moveTo(tx + tile / 2, ty + tile * 0.2);
-        ctx.lineTo(tx + tile, ty + tile);
-        ctx.lineTo(tx, ty + tile);
-        ctx.closePath();
-        ctx.fill();
-      }
-    }
+  ctx.fillStyle = CL_THUMB_BG[style];
+  ctx.fillRect(ox, oy, EDITOR_COLS * tile, EDITOR_ROWS * tile);
+  for (const z of level.flips || []) {
+    ctx.fillStyle = 'rgba(255,255,255,.22)';
+    ctx.fillRect(ox + z.c * tile, oy + z.r * tile, z.w * tile, z.h * tile);
   }
+  LK.levelGrid(level).forEach((row, r) => row.forEach((ch, c) => {
+    if (!colors[ch]) return;
+    ctx.fillStyle = colors[ch];
+    ctx.fillRect(ox + c * tile, oy + r * tile, Math.ceil(tile), Math.ceil(tile));
+  }));
+  ctx.fillStyle = '#ff3355';
+  for (const tp of level.traps || []) for (const s of tp.slides || []) ctx.fillRect(ox + s.c * tile, oy + (s.r + 0.5) * tile, tile, tile / 2);
 
   ctx.strokeStyle = '#3a3a48';
   ctx.lineWidth = 1;
@@ -252,20 +264,17 @@ function clDrawButton(btn, label, opts) {
   ctx.textAlign = 'left';
 }
 
-function formatCustomLevelMeta(level) {
+function formatCustomLevelMeta(rec) {
   const parts = [];
-  if (level.stats.bestDeaths === null) {
+  if (rec.stats.bestDeaths === null) {
     parts.push('Not finished yet');
   } else {
-    parts.push('Best: ' + level.stats.bestDeaths + (level.stats.bestDeaths === 1 ? ' death' : ' deaths'));
+    parts.push('Best: ' + rec.stats.bestDeaths + (rec.stats.bestDeaths === 1 ? ' death' : ' deaths'));
   }
-  parts.push(level.stats.plays + (level.stats.plays === 1 ? ' play' : ' plays'));
-
-  let spikeCount = 0;
-  level.map.forEach(row => {
-    for (const char of row) if (/[0-9^]/.test(char)) spikeCount++;
-  });
-  parts.push(spikeCount + ' spikes');
+  parts.push(rec.stats.plays + (rec.stats.plays === 1 ? ' play' : ' plays'));
+  const traps = (rec.level.traps || []).length;
+  parts.push(traps + (traps === 1 ? ' trap' : ' traps'));
+  parts.push(LK_STYLE_NAMES[rec.level.style] || 'NEON');
   return parts.join('  •  ');
 }
 
@@ -282,13 +291,14 @@ function drawCustomLevelBrowser() {
   ctx.fillText('MY LEVELS', 168, 54);
   ctx.fillStyle = '#8a8a9c';
   ctx.font = '15px Arial, sans-serif';
-  ctx.fillText('Build your own deceptions - then share them', 170, 78);
+  ctx.fillText('Build your own deceptions - for the full game', 170, 78);
 
   const byId = id => customLevelButtons.find(b => b.id === id);
   clDrawButton(byId('back'), '◀ BACK');
   clDrawButton(byId('new'), '+ NEW LEVEL', { color: '#2f5f9a', hoverColor: '#3a74bd', border: '#88ccff' });
+  clDrawButton(byId('code'), 'LOAD CODE', { hint: 'Paste a share code or link: from a friend, or from the full game' });
   clDrawButton(byId('import'), 'IMPORT', { hint: 'Load level files other players sent you' });
-  clDrawButton(byId('exportAll'), 'EXPORT ALL', { hint: 'Save every level you made to one file' });
+  clDrawButton(byId('exportAll'), 'EXPORT ALL', { hint: 'Save every level you made to one file, ready for the full game' });
 
   if (customLevelList.length === 0) {
     ctx.fillStyle = '#6f6f80';
@@ -296,72 +306,75 @@ function drawCustomLevelBrowser() {
     ctx.textAlign = 'center';
     ctx.fillText('You have not built anything yet.', GAME_WIDTH / 2, 290);
     ctx.font = '16px Arial, sans-serif';
-    ctx.fillText('Paint platforms, drop a spike, drag its trigger - that is the whole editor.', GAME_WIDTH / 2, 322);
+    ctx.fillText('Paint platforms, aim a hidden spike, drag its trigger - that is the whole editor.', GAME_WIDTH / 2, 322);
     ctx.textAlign = 'left';
 
     clDrawButton(byId('createFirst'), 'CREATE YOUR FIRST LEVEL', {
       color: '#2f5f9a', hoverColor: '#3a74bd', border: '#88ccff', font: 'bold 22px Arial, sans-serif'
     });
-    clDrawButton(byId('importFirst'), 'IMPORT A LEVEL FILE', { font: 'bold 15px Arial, sans-serif' });
-    return;
+    clDrawButton(byId('importFirst'), 'IMPORT A FILE', { font: 'bold 15px Arial, sans-serif' });
+    clDrawButton(byId('codeFirst'), 'LOAD A CODE', { font: 'bold 15px Arial, sans-serif' });
+  } else {
+    const pageLevels = customLevelList.slice(customLevelPage * CL_PER_PAGE, customLevelPage * CL_PER_PAGE + CL_PER_PAGE);
+
+    pageLevels.forEach((rec, i) => {
+      const col = i % CL_COLS;
+      const row = Math.floor(i / CL_COLS);
+      const x = 60 + col * (CL_CARD_W + 30);
+      const y = 130 + row * (CL_CARD_H + 20);
+      const name = rec.level.name;
+
+      const cardHovered = mouseX >= x && mouseX <= x + CL_CARD_W && mouseY >= y && mouseY <= y + CL_CARD_H;
+
+      ctx.fillStyle = '#2b2b36';
+      ctx.fillRect(x, y, CL_CARD_W, CL_CARD_H);
+      ctx.strokeStyle = cardHovered ? '#7a7a9c' : '#3f3f4e';
+      ctx.lineWidth = cardHovered ? 2 : 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, CL_CARD_W - 1, CL_CARD_H - 1);
+
+      drawLevelThumbnail(rec.level, x + 58, y + 8, 224, 126);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 18px Arial, sans-serif';
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x + 10, y + 138, 320, 24);
+      ctx.clip();
+      ctx.fillText(name, x + 10, y + 156);
+      ctx.restore();
+
+      ctx.fillStyle = '#8a8a9c';
+      ctx.font = '12px Arial, sans-serif';
+      ctx.fillText(formatCustomLevelMeta(rec), x + 10, y + 176);
+
+      clDrawButton(byId('play:' + rec.id), '▶ PLAY', {
+        color: '#2f7a3f', hoverColor: '#389a4d', border: '#66ff99', hint: 'Play "' + name + '"'
+      });
+      clDrawButton(byId('edit:' + rec.id), 'EDIT', { hint: 'Open "' + name + '" in the editor' });
+      clDrawButton(byId('share:' + rec.id), 'SHARE', { font: 'bold 13px Arial, sans-serif', hint: 'Copy a share code: friends paste it into LOAD CODE, you into the full game' });
+      clDrawButton(byId('copy:' + rec.id), '⧉', { font: 'bold 17px Arial, sans-serif', hint: 'Duplicate this level' });
+      clDrawButton(byId('export:' + rec.id), '↑', { font: 'bold 19px Arial, sans-serif', hint: 'Export to a file you can share' });
+      clDrawButton(byId('delete:' + rec.id), '✕', {
+        font: 'bold 16px Arial, sans-serif', textColor: '#ff9999', hint: 'Delete this level for good'
+      });
+    });
+
+    if (customLevelList.length > CL_PER_PAGE) {
+      const pages = Math.ceil(customLevelList.length / CL_PER_PAGE);
+      clDrawButton(byId('prevPage'), '◀');
+      clDrawButton(byId('nextPage'), '▶');
+      ctx.fillStyle = '#aaaab8';
+      ctx.font = 'bold 16px Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Page ' + (customLevelPage + 1) + ' / ' + pages, GAME_WIDTH / 2, 660);
+      ctx.textAlign = 'left';
+    }
   }
 
-  const pageLevels = customLevelList.slice(customLevelPage * CL_PER_PAGE, customLevelPage * CL_PER_PAGE + CL_PER_PAGE);
-
-  pageLevels.forEach((level, i) => {
-    const col = i % CL_COLS;
-    const row = Math.floor(i / CL_COLS);
-    const x = 60 + col * (CL_CARD_W + 30);
-    const y = 140 + row * (CL_CARD_H + 20);
-
-    const cardHovered = mouseX >= x && mouseX <= x + CL_CARD_W && mouseY >= y && mouseY <= y + CL_CARD_H;
-
-    ctx.fillStyle = '#2b2b36';
-    ctx.fillRect(x, y, CL_CARD_W, CL_CARD_H);
-    ctx.strokeStyle = cardHovered ? '#7a7a9c' : '#3f3f4e';
-    ctx.lineWidth = cardHovered ? 2 : 1;
-    ctx.strokeRect(x + 0.5, y + 0.5, CL_CARD_W - 1, CL_CARD_H - 1);
-
-    drawLevelThumbnail(level, x + 70, y + 10, 200, 120);
-
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 18px Arial, sans-serif';
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(x + 10, y + 134, 320, 24);
-    ctx.clip();
-    ctx.fillText(level.name, x + 10, y + 152);
-    ctx.restore();
-
-    ctx.fillStyle = '#8a8a9c';
-    ctx.font = '12px Arial, sans-serif';
-    ctx.fillText(formatCustomLevelMeta(level), x + 10, y + 172);
-
-    clDrawButton(byId('play:' + level.id), '▶ PLAY', {
-      color: '#2f7a3f', hoverColor: '#389a4d', border: '#66ff99', hint: 'Play "' + level.name + '"'
-    });
-    clDrawButton(byId('edit:' + level.id), 'EDIT', { hint: 'Open "' + level.name + '" in the editor' });
-    clDrawButton(byId('copy:' + level.id), '⧉', { font: 'bold 17px Arial, sans-serif', hint: 'Duplicate this level' });
-    clDrawButton(byId('export:' + level.id), '↑', { font: 'bold 19px Arial, sans-serif', hint: 'Export to a file you can share' });
-    clDrawButton(byId('delete:' + level.id), '✕', {
-      font: 'bold 16px Arial, sans-serif', textColor: '#ff9999', hint: 'Delete this level for good'
-    });
-  });
-
-  if (customLevelList.length > CL_PER_PAGE) {
-    const pages = Math.ceil(customLevelList.length / CL_PER_PAGE);
-    clDrawButton(byId('prevPage'), '◀');
-    clDrawButton(byId('nextPage'), '▶');
-    ctx.fillStyle = '#aaaab8';
-    ctx.font = 'bold 16px Arial, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Page ' + (customLevelPage + 1) + ' / ' + pages, GAME_WIDTH / 2, 670);
-    ctx.textAlign = 'left';
-  }
-
-  ctx.fillStyle = '#8a8a9c';
-  ctx.font = '14px Arial, sans-serif';
-  ctx.fillText(customLevelHint || 'N  new level      F  fullscreen      ESC  menu', 30, 700);
+  const notice = performance.now() < customLevelNoticeUntil;
+  ctx.fillStyle = notice ? '#88ff88' : '#8a8a9c';
+  ctx.font = notice ? 'bold 14px Arial, sans-serif' : '14px Arial, sans-serif';
+  ctx.fillText(notice ? customLevelNoticeText : customLevelHint || 'N  new level      L  load code      F  fullscreen      ESC  menu', 30, 700);
 }
 
 function handleCustomLevelClick(x, y) {
@@ -379,12 +392,17 @@ function handleCustomLevelClick(x, y) {
     case 'createFirst':
       openEditorForNewLevel();
       return;
+    case 'code':
+    case 'codeFirst':
+      promptLoadLevelCode();
+      return;
     case 'import':
     case 'importFirst':
       promptImportCustomLevels((added, error) => {
         refreshCustomLevelBrowser();
+        customLevelPage = 0;
         if (error) alert(error);
-        else alert(added + (added === 1 ? ' level imported!' : ' levels imported!'));
+        else customLevelNotice(added + (added === 1 ? ' level imported' : ' levels imported'));
       });
       return;
     case 'exportAll':
@@ -398,28 +416,32 @@ function handleCustomLevelClick(x, y) {
       return;
   }
 
-  const level = getCustomLevel(id);
-  if (!level) {
+  const rec = getCustomLevel(id);
+  if (!rec) {
     refreshCustomLevelBrowser();
     return;
   }
+  const name = rec.level.name;
 
   switch (action) {
     case 'play':
     case 'card': {
-      const problems = [];
-      if (!level.map.some(row => row.includes('S'))) problems.push('a spawn point');
-      if (!level.map.some(row => row.includes('D'))) problems.push('a door');
-      if (problems.length > 0) {
-        alert('"' + level.name + '" is missing ' + problems.join(' and ') + '.\nOpen it in the editor to finish it.');
+      const bad = LK.checkLevel(rec.level).filter(p => p.bad);
+      if (bad.length > 0) {
+        alert('"' + name + '" cannot be played yet:\n' + bad.map(p => p.text).join('\n') + '\nOpen it in the editor to finish it.');
         return;
       }
-      startCustomLevelSession(level, 'customLevels');
+      startCustomLevelSession(rec, 'customLevels');
       return;
     }
     case 'edit':
-      openEditor(level, 'customLevels');
+      openEditor(rec, 'customLevels');
       return;
+    case 'share': {
+      const text = levelShareText(rec.level), what = text.includes('#lvl=') ? 'link' : 'code';
+      copyShareText(text, ok => customLevelNotice(ok ? 'Share ' + what + ' for "' + name + '" copied' : 'Share ' + what + ' shown'));
+      return;
+    }
     case 'copy':
       if (duplicateCustomLevel(id)) {
         refreshCustomLevelBrowser();
@@ -427,10 +449,10 @@ function handleCustomLevelClick(x, y) {
       }
       return;
     case 'export':
-      exportCustomLevel(level);
+      exportCustomLevel(rec);
       return;
     case 'delete':
-      if (confirm('Delete "' + level.name + '" for good?\nExport it first if you want to keep a copy.')) {
+      if (confirm('Delete "' + name + '" for good?\nExport it first if you want to keep a copy.')) {
         deleteCustomLevel(id);
         refreshCustomLevelBrowser();
       }
@@ -451,6 +473,10 @@ function handleCustomLevelKey(e) {
     openEditorForNewLevel();
     return;
   }
+  if (e.code === 'KeyL') {
+    promptLoadLevelCode();
+    return;
+  }
   if (e.code === 'ArrowLeft') {
     customLevelPage = Math.max(0, customLevelPage - 1);
     return;
@@ -468,7 +494,7 @@ function editorCanvasPoint(event) {
 }
 
 canvas.addEventListener('mousedown', (event) => {
-  if (gameState !== 'editor') return;
+  if (gameState !== 'editor' || transitionState !== 'none') return;
   const p = editorCanvasPoint(event);
   editorMouseDown(p.x, p.y, event.button, event);
 });
@@ -481,8 +507,7 @@ canvas.addEventListener('mousemove', (event) => {
 
 window.addEventListener('mouseup', (event) => {
   if (gameState !== 'editor') return;
-  const p = editorCanvasPoint(event);
-  editorMouseUp(p.x, p.y);
+  editorMouseUp();
 });
 
 canvas.addEventListener('contextmenu', (event) => {
@@ -490,9 +515,13 @@ canvas.addEventListener('contextmenu', (event) => {
 });
 
 window.addEventListener('keydown', (event) => {
+  if (transitionState !== 'none') return;
   if (gameState === 'editor') {
     editorKeyDown(event);
   } else if (gameState === 'customLevels') {
     handleCustomLevelKey(event);
   }
 });
+
+// Opened from a share link: straight into its level
+openSharedLevelFromLink();

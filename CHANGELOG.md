@@ -3,6 +3,32 @@
 All notable changes to DISBELIEVE are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Level Editor
+
+- The editor now makes levels for the **full DISBELIEVE game**: its 32 x 18
+  screen, its level format and its physics, so a level built here plays the
+  same there.
+- New things to build with: spikes in plain sight pointing four ways, hidden
+  **trap spikes** (eight directions, creep / fast / snap, a delay, a reach),
+  **sliding spikes** that dash when triggered, **gravity up / down** zones,
+  **flip zones** with a wait, **decoy doors**, **hint text** that can wait for
+  deaths, and crumbling blocks that can come back.
+- **Traps**: spikes that fire together, with one or more triggers - boxes or
+  lines, hidden or visible, on or off. Each trap has its own color and number.
+- **Share** a level as a code (or a link when the game runs from a web page);
+  **LOAD CODE** in My Levels reads codes from friends and from the full game.
+  Opening a share link plays its level straight away.
+- Exported files are now level packs in the full game's format.
+- Levels made with the first editor are moved into the bigger screen
+  automatically; old level files still import.
+
+### Fixes
+
+- SETTINGS opened from the pause menu of a custom level no longer loses the
+  level.
+
 ## [v1.0.0] - 2026-09-15
 
 The first packaged release of the DISBELIEVE prototype. Everything below is

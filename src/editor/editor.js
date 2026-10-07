@@ -1,738 +1,940 @@
 /*
  * EDITOR.JS - The in-game level editor
  *
- * Everything is edited directly on the map: you paint tiles with the mouse and
- * you shape a spike's trap by DRAGGING it - the ghost shows where the spike
- * will shoot to (any of eight directions), and the yellow trigger can be
- * dragged anywhere on the map and resized from either end. No number boxes
- * anywhere; direction and speed are picked from icons in the palette.
+ * Builds levels for the full DISBELIEVE game: its 32 x 18 screen, its level
+ * format and every kind of block, spike and zone it has (levelkit.js), so a
+ * level made here can go into the full game as it is. The level is drawn with
+ * the same code that plays it (level_play.js), so what you build is exactly
+ * what you play.
  *
- * The editor draws the level with the real game renderers, so what you build
- * is exactly what you play.
+ * Editing: pick a tool in the palette, click or drag on the map; SHIFT+drag
+ * fills a rectangle, right-click erases. A trap spike is hidden until its trap
+ * fires: press a tile and drag to aim it, then drag the trigger that fires it.
+ * Sliding spikes sit in plain sight and dash when their trap fires: press a
+ * tile and drag to where they dash, then drag the trigger. Each trap has its
+ * own color and number, and a line from each of its triggers to each of its
+ * spikes. SELECT picks a trap (click one of its spikes or triggers), a flip
+ * zone or a hint: drag to move it, drag a trigger's or a flip zone's corner to
+ * size it, and the panel under the palette changes it: a trap's speed, delay,
+ * reach and dash, its triggers shown or hidden, on or off, more spikes (they
+ * fire together) or another trigger; a flip zone's wait; a hint's words, size
+ * and when it shows. SELECT also drags the start, the door and decoy doors.
  */
 
-// ===== LAYOUT =====
+// ===== LAYOUT (in the 1200 x 720 game space) =====
 const ED_TOPBAR_H = 56;      // Level name / style / test / save
-const ED_PALETTE_W = 190;    // Tool column on the left
-const ED_BOTTOM_Y = 676;     // Status + hint bar starts here
-const ED_TILE = 50;          // On-screen size of one tile inside the editor
-const ED_GRID_X = 195;
-const ED_GRID_Y = 66;
-const ED_SCALE = ED_TILE / TILE_SIZE; // World (60px tiles) -> editor pixels
-const ED_TOOLS_Y = 86;       // First tool button
-const ED_TOOL_H = 36;
-const ED_TOOL_STEP = 38;
-const ED_SPIKE_Y = 478;      // Spike controls start here
-const ED_SPIKE_DIR_Y = 580;  // Direction pad / speed stepper row
-const ED_GRID_W = EDITOR_COLS * ED_TILE;
-const ED_GRID_H = EDITOR_ROWS * ED_TILE;
+const ED_PALETTE_W = 226;    // Tools and the panel on the left
+const ED_BOTTOM_Y = 608;     // Status + hint bar starts here
+const ED_SCALE = 0.5;        // World (the 1920 x 1080 level) -> editor pixels
+const ED_TILE = LK.TILE * ED_SCALE;
+const ED_GRID_X = 232;
+const ED_GRID_Y = 62;
+const ED_GRID_W = LK.W * ED_SCALE;
+const ED_GRID_H = LK.H * ED_SCALE;
+const ED_PANEL_Y = 372;      // The panel under the palette: the picked thing, or the tool's settings
 
 // ===== TOOLS =====
-const EDITOR_TOOLS = [
-  { id: 'select',    label: 'SELECT',  key: 'V', keyCode: 'KeyV', char: null, color: '#ffcc44' },
-  { id: 'block',     label: 'SOLID',   key: 'B', keyCode: 'KeyB', char: '#',  color: '#888888' },
-  { id: 'fake',      label: 'FAKE',    key: 'F', keyCode: 'KeyF', char: 'F',  color: '#ff66cc' },
-  { id: 'invisible', label: 'HIDDEN',  key: 'I', keyCode: 'KeyI', char: 'I',  color: '#44dddd' },
-  { id: 'crumble',   label: 'CRUMBLE', key: 'C', keyCode: 'KeyC', char: 'E',  color: '#ddaa55' },
-  { id: 'spike',     label: 'SPIKE',   key: 'K', keyCode: 'KeyK', char: null, color: '#ff4455' },
-  { id: 'gravity',   label: 'GRAVITY', key: 'G', keyCode: 'KeyG', char: 'G',  color: '#8c66ff' },
-  { id: 'spawn',     label: 'SPAWN',   key: 'S', keyCode: 'KeyS', char: 'S',  color: '#44aaff' },
-  { id: 'door',      label: 'DOOR',    key: 'D', keyCode: 'KeyD', char: 'D',  color: '#44ff88' },
-  { id: 'erase',     label: 'ERASER',  key: 'X', keyCode: 'KeyX', char: '.',  color: '#666666' }
+// The palette: each group is one row of up to 4 tools under its name.
+const ED_GROUPS = [
+  { n: 'EDIT', col: '#e8ecff', tools: ['select', 'erase'] },
+  { n: 'GROUND', col: '#8fa3ff', tools: ['solid', 'fake', 'invisible', 'crumble'] },
+  { n: 'SPIKES', col: '#ff4d6d', tools: ['spikes', 'trap', 'slide'] },
+  { n: 'GRAVITY', col: '#44ddff', tools: ['gravityUp', 'gravityDown', 'flip'] },
+  { n: 'DOORS AND SIGNS', col: '#33ee77', tools: ['start', 'door', 'decoy', 'text'] }
 ];
-
-const EDITOR_TOOL_HINTS = {
-  select: 'SELECT: click a spike, then drag its ghost, its trigger, or the spike itself. Also drags SPAWN and DOOR.',
-  block:  'SOLID: normal platform. Drag to paint, hold SHIFT for a rectangle.',
-  fake:   'FAKE: looks solid, player falls straight through it.',
-  invisible: 'HIDDEN: solid but completely invisible while playing.',
-  crumble: 'CRUMBLE: breaks away shortly after the player stands on it.',
-  spike:  'SPIKE: click to place. It is selected at once, ready to aim and drag.',
-  gravity: 'GRAVITY: paint a zone. Connected tiles become one flip zone.',
-  spawn:  'SPAWN: where the player starts. Only one per level.',
-  door:   'DOOR: the exit. Only one per level.',
-  erase:  'ERASER: click or drag to clear tiles. Right-click erases with any tool.'
+// ch: what it paints on the map (levelkit.js's map characters); key: its shortcut
+const ED_TOOLS = {
+  select: { n: 'Select', key: 'V', hint: 'Click a trap’s spike or trigger, a flip zone or a hint to pick it. Drag to move it, drag a corner to size it, DELETE removes it. Drags the start and the doors too.' },
+  erase: { n: 'Erase', key: 'X', ch: '.', hint: 'Click or drag to erase tiles, doors, spikes, flip zones and hints; SHIFT+drag erases a rectangle. Triggers: SELECT, then DELETE.' },
+  solid: { n: 'Solid', key: 'B', ch: '#', hint: 'Ground. Drag to paint, SHIFT+drag to fill a rectangle, right-click to erase.' },
+  fake: { n: 'Fake', key: 'F', ch: 'F', hint: 'Looks exactly like ground. The square falls straight through it.' },
+  invisible: { n: 'Invisible', key: 'I', ch: 'I', hint: 'Empty air that is secretly solid. It shows faintly once touched.' },
+  crumble: { n: 'Crumble', key: 'C', ch: 'C', hint: 'Holds for 0.6 s once the square lands on it, then falls. Below: whether it comes back.' },
+  spikes: { n: 'Spikes', key: 'K', hint: 'Spikes in plain sight. R turns them.' },
+  trap: { n: 'Trap spike', key: 'T', hint: 'A hidden spike: press a tile and drag to aim it (8 ways), then drag the trigger that fires it.' },
+  slide: { n: 'Sliding spikes', key: 'L', hint: 'Spikes in plain sight that dash when triggered: press a tile and drag to where they dash, then drag the trigger.' },
+  gravityUp: { n: 'Gravity up', key: 'U', ch: 'u', hint: 'Cyan zone: gravity flips up as the square enters it.' },
+  gravityDown: { n: 'Gravity down', key: 'N', ch: 'd', hint: 'Magenta zone: gravity turns back down.' },
+  flip: { n: 'Flip zone', key: 'G', hint: 'Flips gravity whichever way it is as the square enters it. Drag to draw one.' },
+  start: { n: 'Start', key: 'S', ch: 'P', hint: 'Where the square appears. A level has one.' },
+  door: { n: 'Door', key: 'D', ch: 'D', hint: 'The exit. Put it on a floor, or under a ceiling to have it upside down.' },
+  decoy: { n: 'Decoy door', key: 'O', ch: 'X', hint: 'Looks exactly like the exit. It kills.' },
+  text: { n: 'Hint text', key: 'H', hint: 'Click to write a hint on the level. It can show only after some deaths.' }
 };
-
-// Default trigger offset used by the game when a level defines none.
-const ED_DEFAULT_TRIGGER = -0.5;
-
-// Snapping while dragging a trigger: normal / SHIFT (half a tile) / ALT (free)
-const ED_TRIGGER_SNAP = 10;
-const ED_TRIGGER_SNAP_COARSE = TILE_SIZE / 2;
-const ED_MIN_TRIGGER_HEIGHT = 10;
-
-// The eight directions, laid out the way they sit on a 3x3 pad
-const ED_DIRECTION_PAD = [
-  ['upLeft',   'up',   'upRight'],
-  ['left',      null,  'right'],
-  ['downLeft', 'down', 'downRight']
-];
+const ED_TOOL_ORDER = ED_GROUPS.flatMap(g => g.tools);
+// The choices the panel cycles through. REACHES: how far a trap spike flies, in tiles (0: until it hits something);
+// DASHES: how long sliding spikes take to dash; COOLS: a flip zone's wait between flips; RESPAWNS: when fallen crumble
+// blocks are back (0: never); SHOWS: when a hint shows, by the deaths in the level so far.
+const ED_DELAYS = [0, 0.15, 0.3, 0.5], ED_REACHES = [0, 1, 1.5, 2, 3, 5], ED_DASHES = [0.2, 0.4, 1, 2], ED_COOLS = [0, 0.5, 1, 2];
+const ED_RESPAWNS = [0, 1, 2, 3.5, 5];
+const ED_TEXT_SIZES = [[40, 'small'], [60, 'medium'], [90, 'big']], ED_SHOWS = [{}, { min: 1 }, { min: 2 }, { min: 3 }, { min: 5 }, { max: 0 }];
+// As many as a level file keeps (cleanLevel in levelkit.js)
+const ED_MAX = { traps: 120, spikes: 60, slides: 60, triggers: 20, flips: 60, text: 30, decoys: 40 };
+// Each trap's color (its spikes, its triggers and the lines between them); on the sketch page, darker inks of the same
+const ED_TRAP_COLS = ['#ffcc33', '#ff44dd', '#44ff99', '#ff8844', '#88aaff', '#ff6b8b', '#b388ff', '#4dd0e1', '#c6ff4d', '#ffa77a'];
+const ED_TRAP_INKS = ['#b08300', '#c0189c', '#0c9a55', '#cc5a12', '#3a5fd6', '#d0244c', '#7445e0', '#0b8fa3', '#5f8f00', '#c55a2e'];
+const edTrapColor = (i, paper) => (paper ? ED_TRAP_INKS : ED_TRAP_COLS)[((i | 0) % 10 + 10) % 10];
+const ED_MAX_UNDO = 100;
 
 // ===== EDITOR STATE =====
-let editorDoc = null;              // Working copy: { id, name, visualStyle, grid, spikeMeta, ... }
-let editorTool = 'block';
-let editorSpikeDistance = 2;       // Tiles a newly placed spike will travel
-let editorSpikeDirection = DEFAULT_SPIKE_DIRECTION; // Way a new spike will shoot
-let editorSpikeSpeed = DEFAULT_SPIKE_SPEED;         // Speed a new spike will use
-let editorSelectedSpike = null;    // { row, col } of the spike being tuned
-let editorDrag = null;             // Active mouse drag description
-let editorUndoStack = [];
-let editorRedoStack = [];
-let editorDirty = false;           // Unsaved changes?
-let editorNameEditing = false;
-let editorPreviewMode = false;     // Hide editor overlays to see the real level
-let editorShowGrid = true;
-let editorShowHelp = false;
-let editorReturnState = 'customLevels';
-let editorStatusText = '';
-let editorStatusColor = '#88ff88';
-let editorStatusTimer = 0;
-let editorBlink = 0;
-let editorHoverCell = null;
-let editorButtons = [];            // Rebuilt every frame, used for click hit-tests
-let editorMouse = { x: 0, y: 0 };
-let editorModifiers = { shift: false, alt: false, ctrl: false };
+// rec: the stored record being edited (id, created, stats); map: the level as a grid of map characters (tiles, start,
+// door, decoys); traps, flips, text: the level's, as in its file; crumble: its crumbleRespawn; extra: whatever else the
+// level has that this editor doesn't change. sel: the part picked: a trap's ({ t: its index, part: 'spike' | 'slide' |
+// 'trigger', k }), a flip zone or a hint ({ part: 'flip' | 'text', k }); step 'trigger': the next drag is a trigger for
+// sel's trap; join: spikes placed now join sel's trap. The rest are the settings new parts get (indexes into the lists
+// above), and the screen's state.
+const ED = {
+  rec: null, name: '', style: 'neon', map: null, traps: [], flips: [], text: [], crumble: 0, extra: {},
+  tool: 'solid', sdir: 0, speed: 1, delay: 0, reach: 0, dash: 0, cool: 1, tsize: 1, tshow: 0, show: false, line: false, aim: 0,
+  sel: null, step: null, join: false, drag: null, before: null, hover: null, mouse: { x: 0, y: 0 },
+  L: null, lv: null, problems: [], dirty: true, unsaved: false, undo: [], redo: [],
+  preview: false, grid: true, help: false, naming: false, returnState: 'customLevels',
+  status: '', statusColor: '#88ff88', statusT: 0, blink: 0, time: 0, buttons: [], shift: false, alt: false
+};
 
-const ED_MAX_UNDO = 60;
+// ===== MODEL: the level being edited =====
 
-// ===== MODEL: level file <-> editor document =====
+const edClone = o => JSON.parse(JSON.stringify(o));
 
-function spikeKey(row, col) {
-  return row + ',' + col;
+function edLevel() {
+  return LK.tidyLevel(Object.assign({ name: ED.name, style: ED.style }, edClone(ED.extra), LK.gridParts(ED.map),
+    { traps: edClone(ED.traps), flips: edClone(ED.flips), text: edClone(ED.text), crumbleRespawn: ED.crumble || null }));
 }
 
-function isSpikeChar(char) {
-  return /^[0-9]$/.test(char) || char === '^';
+function edRecord() {
+  return { id: ED.rec.id, level: edLevel(), created: ED.rec.created, stats: ED.rec.stats };
 }
 
-// Walk the grid in the exact order parseLevel() does, so spike indices in
-// spikeTriggers / spikeTriggerLengths always line up with the right spike.
-function forEachSpikeInOrder(grid, callback) {
-  let index = 0;
-  for (let row = 0; row < grid.length; row++) {
-    for (let col = 0; col < grid[row].length; col++) {
-      if (isSpikeChar(grid[row][col])) {
-        callback(row, col, index, grid[row][col]);
-        index++;
-      }
-    }
-  }
-}
-
-// The editor keeps every trigger as a plain rectangle in pixels, relative to
-// the spike's own tile. A classic trigger line is simply a rectangle with a
-// width of 0, so one set of handles can shape every trap.
-function triggerAreaFromLevel(level, index, row, col) {
-  const stored = level.spikeTriggerAreas ? level.spikeTriggerAreas[index] : null;
-  if (stored && typeof stored === 'object') {
-    return {
-      x: Number(stored.x) || 0,
-      y: Number(stored.y) || 0,
-      w: Math.max(0, Number(stored.w) || 0),
-      h: Math.max(0, Number(stored.h) || 0)
-    };
-  }
-
-  // No rectangle stored: rebuild the line from the classic two arrays
-  const rawTrigger = level.spikeTriggers && level.spikeTriggers[index] !== undefined
-    ? Number(level.spikeTriggers[index])
-    : ED_DEFAULT_TRIGGER;
-  const trigger = isFinite(rawTrigger) ? rawTrigger : ED_DEFAULT_TRIGGER;
-
-  const rawLength = level.spikeTriggerLengths ? level.spikeTriggerLengths[index] : undefined;
-  const length = (rawLength === undefined || rawLength === null || rawLength === 0 || !isFinite(rawLength))
-    ? null
-    : Number(rawLength);
-
-  const tileY = row * TILE_SIZE;
-  const spikeTop = tileY + 20;
-  const x = -trigger * TILE_SIZE;
-
-  if (length === null) return { x: x, y: -tileY, w: 0, h: GAME_HEIGHT };      // full height
-  if (length > 0) return { x: x, y: spikeTop - length - tileY, w: 0, h: length }; // upward
-  return { x: x, y: spikeTop - tileY, w: 0, h: Math.abs(length) };               // downward
-}
-
-// ...and turns it back into the classic fields whenever it still fits them, so
-// levels that were never reshaped keep saving in the original compact format.
-function triggerAreaToLevelFields(area, row) {
-  const tileY = row * TILE_SIZE;
-  const spikeTop = tileY + 20;
-  const top = tileY + area.y;
-  const bottom = top + area.h;
-  const trigger = -area.x / TILE_SIZE;
-  const close = (a, b) => Math.abs(a - b) < 0.001;
-
-  if (area.w === 0) {
-    if (close(top, 0) && close(bottom, GAME_HEIGHT)) {
-      return { trigger: trigger, length: null, area: null };          // full height
-    }
-    if (area.h > 0 && close(bottom, spikeTop)) {
-      return { trigger: trigger, length: area.h, area: null };        // upward from the spike
-    }
-    if (area.h > 0 && close(top, spikeTop)) {
-      return { trigger: trigger, length: -area.h, area: null };       // downward from the spike
-    }
-  }
-  // Anything else needs the explicit rectangle
-  return { trigger: trigger, length: null, area: { x: area.x, y: area.y, w: area.w, h: area.h } };
-}
-
-// Stored level -> editable document
-function levelToEditorDoc(level) {
-  const grid = sanitizeLevelMap(level.map).map(row => row.split(''));
-  const spikeMeta = {};
-
-  forEachSpikeInOrder(grid, (row, col, index, char) => {
-    // '^' is the legacy 2-tile spike; normalise it to a digit
-    if (char === '^') grid[row][col] = '2';
-
-    spikeMeta[spikeKey(row, col)] = {
-      area: triggerAreaFromLevel(level, index, row, col),
-      dir: normalizeSpikeDirection(level.spikeDirections ? level.spikeDirections[index] : undefined),
-      speed: normalizeSpikeSpeed(level.spikeSpeeds ? level.spikeSpeeds[index] : undefined)
-    };
-  });
-
-  return {
-    id: level.id,
-    name: level.name,
-    visualStyle: level.visualStyle || 'default',
-    created: level.created,
-    stats: level.stats,
-    grid: grid,
-    spikeMeta: spikeMeta
-  };
-}
-
-// Editable document -> stored level (same format the chapters use)
-function editorDocToLevel(doc) {
-  const triggers = [];
-  const lengths = [];
-  const areas = [];
-  const directions = [];
-  const speeds = [];
-
-  forEachSpikeInOrder(doc.grid, (row, col) => {
-    const meta = doc.spikeMeta[spikeKey(row, col)] || makeSpikeMeta(row);
-    const fields = triggerAreaToLevelFields(meta.area, row);
-    triggers.push(fields.trigger);
-    lengths.push(fields.length);
-    areas.push(fields.area);
-    directions.push(normalizeSpikeDirection(meta.dir));
-    speeds.push(normalizeSpikeSpeed(meta.speed));
-  });
-
-  return {
-    id: doc.id,
-    name: doc.name,
-    visualStyle: doc.visualStyle,
-    map: doc.grid.map(row => row.join('')),
-    spikeTriggers: triggers,
-    spikeTriggerLengths: lengths,
-    spikeTriggerAreas: areas,
-    spikeDirections: directions,
-    spikeSpeeds: speeds,
-    created: doc.created,
-    modified: Date.now(),
-    stats: doc.stats
-  };
-}
-
-// A brand new spike: the classic full-height line just left of the spike,
-// shooting the way the palette is currently set.
-function makeSpikeMeta(row) {
-  return {
-    area: { x: -ED_DEFAULT_TRIGGER * TILE_SIZE, y: -row * TILE_SIZE, w: 0, h: GAME_HEIGHT },
-    dir: normalizeSpikeDirection(editorSpikeDirection),
-    speed: normalizeSpikeSpeed(editorSpikeSpeed)
-  };
-}
-
-function getSpikeMeta(row, col) {
-  if (!editorDoc) return null;
-  const key = spikeKey(row, col);
-  const meta = editorDoc.spikeMeta[key];
-  if (!meta) {
-    editorDoc.spikeMeta[key] = makeSpikeMeta(row);
-    return editorDoc.spikeMeta[key];
-  }
-  // Levels saved before directions and speeds existed
-  if (!meta.area) meta.area = makeSpikeMeta(row).area;
-  if (!meta.dir) meta.dir = DEFAULT_SPIKE_DIRECTION;
-  if (!meta.speed) meta.speed = DEFAULT_SPIKE_SPEED;
-  return meta;
+function edLoad(rec) {
+  const lv = rec.level;
+  ED.rec = { id: rec.id, created: rec.created, stats: rec.stats };
+  ED.map = LK.levelGrid(lv);
+  ED.style = LK.LEVEL_STYLES.includes(lv.style) ? lv.style : 'neon';
+  ED.name = lv.name || 'Untitled Level';
+  ED.traps = edClone(lv.traps || []).map(tp => Object.assign(tp, { spikes: tp.spikes || [], slides: tp.slides || [], triggers: tp.triggers || [] }));
+  ED.flips = edClone(lv.flips || []);
+  ED.text = edClone(lv.text || []);
+  ED.crumble = lv.crumbleRespawn || 0;
+  ED.extra = {};
+  for (const k of ['bonus', 'view', 'killTop']) if (lv[k] != null) ED.extra[k] = edClone(lv[k]);
+  ED.sel = ED.step = ED.drag = ED.before = null;
+  ED.join = false;
+  ED.dirty = true;
+  ED.unsaved = false;
+  ED.undo = [];
+  ED.redo = [];
 }
 
 // ===== UNDO / REDO =====
 
-function editorSnapshot() {
-  return JSON.stringify({
-    name: editorDoc.name,
-    visualStyle: editorDoc.visualStyle,
-    grid: editorDoc.grid,
-    spikeMeta: editorDoc.spikeMeta
-  });
+const edSnapshot = () => JSON.stringify({ m: ED.map.map(r => r.join('')), t: ED.traps, s: ED.style, f: ED.flips, x: ED.text, c: ED.crumble });
+
+function edPushUndo(before) {
+  ED.undo.push(before);
+  if (ED.undo.length > ED_MAX_UNDO) ED.undo.shift();
+  ED.redo.length = 0;
+  ED.dirty = true;
+  ED.unsaved = true;
 }
 
-function pushEditorUndo() {
-  if (!editorDoc) return;
-  editorUndoStack.push(editorSnapshot());
-  if (editorUndoStack.length > ED_MAX_UNDO) editorUndoStack.shift();
-  editorRedoStack.length = 0;
-  editorDirty = true;
+// Runs a change; if anything changed, it can be undone.
+function edChange(fn) {
+  const before = edSnapshot();
+  fn();
+  if (edSnapshot() !== before) edPushUndo(before);
+  ED.dirty = true;
 }
 
-function applyEditorSnapshot(snapshot) {
-  const data = JSON.parse(snapshot);
-  editorDoc.name = data.name;
-  editorDoc.visualStyle = data.visualStyle;
-  editorDoc.grid = data.grid;
-  editorDoc.spikeMeta = data.spikeMeta;
-
-  // The selected spike may not exist any more after the jump
-  if (editorSelectedSpike) {
-    const { row, col } = editorSelectedSpike;
-    if (!isSpikeChar(editorDoc.grid[row][col])) editorSelectedSpike = null;
-  }
+function edRestore(s) {
+  const o = JSON.parse(s);
+  ED.map = o.m.map(r => r.split(''));
+  ED.traps = o.t;
+  ED.style = o.s;
+  ED.flips = o.f;
+  ED.text = o.x;
+  ED.crumble = o.c;
+  if (ED.sel && !edPartOf(ED.sel)) { ED.sel = null; ED.join = false; }
+  ED.step = null;
+  ED.dirty = true;
+  ED.unsaved = true;
 }
 
 function editorUndo() {
-  if (editorUndoStack.length === 0) {
-    setEditorStatus('Nothing left to undo', '#ffaa44');
-    return;
-  }
-  editorRedoStack.push(editorSnapshot());
-  applyEditorSnapshot(editorUndoStack.pop());
-  editorDirty = true;
+  if (!ED.undo.length) { setEditorStatus('Nothing left to undo', '#ffaa44'); return; }
+  ED.redo.push(edSnapshot());
+  edRestore(ED.undo.pop());
   setEditorStatus('Undo', '#88ccff');
 }
 
 function editorRedo() {
-  if (editorRedoStack.length === 0) {
-    setEditorStatus('Nothing left to redo', '#ffaa44');
-    return;
-  }
-  editorUndoStack.push(editorSnapshot());
-  applyEditorSnapshot(editorRedoStack.pop());
-  editorDirty = true;
+  if (!ED.redo.length) { setEditorStatus('Nothing left to redo', '#ffaa44'); return; }
+  ED.undo.push(edSnapshot());
+  edRestore(ED.redo.pop());
   setEditorStatus('Redo', '#88ccff');
 }
 
 // ===== STATUS TOAST =====
 
 function setEditorStatus(text, color) {
-  editorStatusText = text;
-  editorStatusColor = color || '#88ff88';
-  editorStatusTimer = 3.0;
+  ED.status = text;
+  ED.statusColor = color || '#88ff88';
+  ED.statusT = 3.0;
 }
 
-// ===== VALIDATION =====
+// ===== TRAPS, FLIP ZONES AND HINTS =====
 
-function findEditorChar(char) {
-  for (let row = 0; row < editorDoc.grid.length; row++) {
-    for (let col = 0; col < editorDoc.grid[row].length; col++) {
-      if (editorDoc.grid[row][col] === char) return { row, col };
+const ED_LISTS = { spike: 'spikes', slide: 'slides', trigger: 'triggers' };
+
+function edPartOf(s) {
+  if (!s) return null;
+  if (s.part === 'flip') return ED.flips[s.k];
+  if (s.part === 'text') return ED.text[s.k];
+  const tp = ED.traps[s.t];
+  return tp && tp[ED_LISTS[s.part]][s.k];
+}
+const edSelTrap = () => ED.sel && ED.sel.t != null ? ED.traps[ED.sel.t] : null;
+const edPicked = part => ED.sel && ED.sel.part === part ? edPartOf(ED.sel) : null;
+const edFirstPart = t => ({ t, part: ED.traps[t].spikes.length ? 'spike' : 'slide', k: 0 });
+
+// The trap spike or sliding spikes on a tile (a tile holds one of them).
+function edTrapPartAt(c, r) {
+  for (let t = 0; t < ED.traps.length; t++) {
+    for (const part of ['spike', 'slide']) {
+      const k = ED.traps[t][ED_LISTS[part]].findIndex(s => s.c === c && s.r === r);
+      if (k >= 0) return { t, part, k };
     }
   }
   return null;
 }
 
-function validateEditorDoc() {
-  const problems = [];
-  if (!findEditorChar('S')) problems.push({ level: 'error', text: 'No SPAWN point - place one with the SPAWN tool' });
-  if (!findEditorChar('D')) problems.push({ level: 'error', text: 'No DOOR - the level cannot be finished' });
-
-  const spawn = findEditorChar('S');
-  if (spawn) {
-    const below = editorDoc.grid[spawn.row + 1];
-    const solidBelow = below && ['#', 'I', 'E'].includes(below[spawn.col]);
-    if (!solidBelow) problems.push({ level: 'warn', text: 'Spawn has no ground under it - the player will drop' });
+function edDropTrap(t) {
+  ED.traps.splice(t, 1);
+  if (ED.sel && ED.sel.t != null) {
+    if (ED.sel.t === t) { ED.sel = null; ED.join = false; ED.step = null; }
+    else if (ED.sel.t > t) ED.sel.t--;
   }
-  return problems;
 }
 
-function editorHasErrors() {
-  return validateEditorDoc().some(p => p.level === 'error');
+// A trap goes when its last spike does, with its triggers.
+function edRemoveTrapPart(t, part, k) {
+  const tp = ED.traps[t];
+  tp[ED_LISTS[part]].splice(k, 1);
+  if (!tp.spikes.length && !tp.slides.length) edDropTrap(t);
+  else if (ED.sel && ED.sel.t === t && ED.sel.part !== 'trigger') ED.sel = edFirstPart(t);
+}
+
+// A flip zone or a hint goes; the pick follows the list.
+function edDropItem(part, k) {
+  (part === 'flip' ? ED.flips : ED.text).splice(k, 1);
+  if (ED.sel && ED.sel.part === part) ED.sel = ED.sel.k === k ? null : ED.sel.k > k ? { part, k: ED.sel.k - 1 } : ED.sel;
+}
+
+function edRemoveSelected() {
+  const s = ED.sel;
+  if (!s || !edPartOf(s)) return;
+  edChange(() => {
+    if (s.part === 'flip' || s.part === 'text') edDropItem(s.part, s.k);
+    else if (s.part === 'trigger') { ED.traps[s.t].triggers.splice(s.k, 1); ED.sel = edFirstPart(s.t); }
+    else edRemoveTrapPart(s.t, s.part, s.k);
+  });
+  setEditorStatus('Removed', '#ffaa66');
+}
+
+function edRemoveTrap() {
+  if (!edSelTrap()) return;
+  edChange(() => edDropTrap(ED.sel.t));
+  setEditorStatus('Trap removed', '#ffaa66');
+}
+
+const edTrigRect = g => ({ x: g.c * LK.TILE, y: g.r * LK.TILE, w: g.w * LK.TILE, h: g.h * LK.TILE });
+const edTrigCenter = g => [(g.c + g.w / 2) * LK.TILE, (g.r + g.h / 2) * LK.TILE];
+// The middle of a trap spike's tile, and of a sliding spike strip (it sits low in its tile).
+const edSpikeMid = s => [s.c * LK.TILE + 30, s.r * LK.TILE + 30];
+const edSlideMid = s => [s.c * LK.TILE + 30, s.r * LK.TILE + 42];
+
+// The trigger under a point (world px), the smallest first (a line counts 18 px either side).
+function edTriggerAt(lx, ly) {
+  let best = null;
+  ED.traps.forEach((tp, t) => tp.triggers.forEach((g, k) => {
+    const r = edTrigRect(g), pad = r.w ? 0 : 18;
+    if (lx >= r.x - pad && lx <= r.x + r.w + pad && ly >= r.y && ly <= r.y + r.h) {
+      const a = (r.w || 36) * r.h;
+      if (!best || a < best.a) best = { t, k, a };
+    }
+  }));
+  return best;
+}
+
+// The flip zone under a point, the smallest first; the hint under a point, the one drawn last first.
+function edFlipAt(lx, ly) {
+  let best = -1;
+  ED.flips.forEach((z, k) => {
+    const inside = lx >= z.c * LK.TILE && lx <= (z.c + z.w) * LK.TILE && ly >= z.r * LK.TILE && ly <= (z.r + z.h) * LK.TILE;
+    if (inside && (best < 0 || z.w * z.h < ED.flips[best].w * ED.flips[best].h)) best = k;
+  });
+  return best;
+}
+
+function edTextBox(x) {
+  const px = x.size || 60;
+  ctx.save();
+  ctx.font = lkTextFont(ED.style, px);
+  const w = ctx.measureText(lkPromptText(x.s)).width + 20;
+  ctx.restore();
+  const h = px * 1.15;
+  return { x: x.x - w / 2, y: x.y - h / 2, w, h };
+}
+
+function edTextAt(lx, ly) {
+  for (let k = ED.text.length - 1; k >= 0; k--) {
+    const b = edTextBox(ED.text[k]);
+    if (lx >= b.x && lx <= b.x + b.w && ly >= b.y && ly <= b.y + b.h) return k;
+  }
+  return -1;
+}
+
+// ===== EDITING ON THE MAP =====
+
+// A screen point -> its tile and world position, or null off the map.
+function edCell(px, py) {
+  const lx = (px - ED_GRID_X) / ED_SCALE, ly = (py - ED_GRID_Y) / ED_SCALE;
+  const c = Math.floor(lx / LK.TILE), r = Math.floor(ly / LK.TILE);
+  return (c >= 0 && c < LK.COLS && r >= 0 && r < LK.ROWS) ? { c, r, lx, ly } : null;
+}
+
+const edToolChar = id => id === 'spikes' ? '^>v<'[ED.sdir] : ED_TOOLS[id].ch;
+const edCount = ch => ED.map.reduce((n, row) => n + row.filter(x => x === ch).length, 0);
+
+// One tile painted (or erased). Returns true if anything changed.
+function edPaint(c, r, erase) {
+  const ch = erase ? '.' : edToolChar(ED.tool);
+  if (!ch) return false;
+  let changed = false;
+  if (ch === 'X' && ED.map[r][c] !== 'X' && edCount('X') >= ED_MAX.decoys) {
+    setEditorStatus('A level keeps ' + ED_MAX.decoys + ' decoy doors', '#ffaa44');
+    return false;
+  }
+  if (ch === 'P' || ch === 'D') {                                      // one start and one door
+    for (const row of ED.map) for (let i = 0; i < row.length; i++) if (row[i] === ch) { row[i] = '.'; changed = true; }
+  }
+  if (ch === '.') { const s = edTrapPartAt(c, r); if (s) { edRemoveTrapPart(s.t, s.part, s.k); changed = true; } }
+  if (ED.map[r][c] !== ch) { ED.map[r][c] = ch; changed = true; }
+  if (ch === '.' && !changed) {                                         // nothing else on the tile: a hint on it, or a flip zone over it
+    const x = ED.text.findIndex(o => Math.floor(o.x / LK.TILE) === c && Math.floor(o.y / LK.TILE) === r);
+    const f = x < 0 ? ED.flips.findIndex(z => c >= z.c && c < z.c + z.w && r >= z.r && r < z.r + z.h) : -1;
+    if (x >= 0) { edDropItem('text', x); changed = true; }
+    else if (f >= 0) { edDropItem('flip', f); changed = true; }
+  }
+  if (changed) ED.dirty = true;
+  return changed;
+}
+
+// Every tile on the straight line between two, so a fast drag never leaves gaps.
+function edPaintLine(a, b, erase) {
+  const n = Math.max(Math.abs(b.c - a.c), Math.abs(b.r - a.r));
+  for (let i = 0; i <= n; i++) {
+    const t = n ? i / n : 0;
+    edPaint(Math.round(a.c + (b.c - a.c) * t), Math.round(a.r + (b.r - a.r) * t), erase);
+  }
+}
+
+const edRectOf = d => ({ c: Math.min(d.c0, d.c1), r: Math.min(d.r0, d.r1), w: Math.abs(d.c1 - d.c0) + 1, h: Math.abs(d.r1 - d.r0) + 1 });
+
+function edDown(px, py, erase, shift) {
+  const cell = edCell(px, py);
+  if (!cell) return false;
+  const { c, r, lx, ly } = cell, tool = ED.tool;
+  ED.before = edSnapshot();
+  if (erase) {
+    if (ED.step) { ED.step = null; return true; }                       // right-click: no trigger (the trap waits for one)
+    ED.drag = shift ? { kind: 'rect', erase: true, c0: c, r0: r, c1: c, r1: r } : { kind: 'paint', erase: true, last: { c, r } };
+    if (!shift) edPaint(c, r, true);
+    return true;
+  }
+  if (ED.step === 'trigger' && edSelTrap()) {
+    if (edSelTrap().triggers.length >= ED_MAX.triggers) { setEditorStatus('A trap keeps ' + ED_MAX.triggers + ' triggers', '#ffaa44'); ED.step = null; return true; }
+    ED.drag = { kind: 'trig', c0: c, r0: r, c1: c, r1: r };
+    return true;
+  }
+  if (tool === 'select') {
+    const s = edTrapPartAt(c, r);
+    if (s) { ED.sel = s; ED.drag = { kind: 'movePart' }; return true; }
+    const cur = ED.sel && (ED.sel.part === 'trigger' || ED.sel.part === 'flip') && edPartOf(ED.sel);   // its far corner sizes it
+    if (cur && cur.w && Math.hypot(lx - (cur.c + cur.w) * LK.TILE, ly - (cur.r + cur.h) * LK.TILE) < 30) { ED.drag = { kind: 'size' }; return true; }
+    if (cur && !cur.w && Math.hypot(lx - cur.c * LK.TILE, ly - (cur.r + cur.h) * LK.TILE) < 30) { ED.drag = { kind: 'size' }; return true; }
+    const x = edTextAt(lx, ly);
+    if (x >= 0) { const o = ED.text[x]; ED.sel = { part: 'text', k: x }; ED.drag = { kind: 'moveText', dx: o.x - lx, dy: o.y - ly }; return true; }
+    const h = edTriggerAt(lx, ly);
+    if (h) {
+      const g = ED.traps[h.t].triggers[h.k];
+      ED.sel = { t: h.t, part: 'trigger', k: h.k };
+      ED.drag = { kind: 'moveTrig', dx: g.c - lx / LK.TILE, dy: g.r - ly / LK.TILE };
+      return true;
+    }
+    if ('PDX'.includes(ED.map[r][c])) { ED.drag = { kind: 'moveMark', ch: ED.map[r][c], c, r, under: '.' }; return true; }
+    const f = edFlipAt(lx, ly);
+    if (f >= 0) { const z = ED.flips[f]; ED.sel = { part: 'flip', k: f }; ED.drag = { kind: 'moveFlip', dc: z.c - c, dr: z.r - r }; return true; }
+    ED.sel = null;
+    ED.join = false;
+    return true;
+  }
+  if (tool === 'trap') {
+    const s = edTrapPartAt(c, r);
+    if (s && s.part === 'spike') { ED.sel = s; ED.drag = { kind: 'aim', c, r, dir: LK.dirIndex(edPartOf(s).dir), spike: s }; }
+    else if (s) ED.sel = s;                                             // sliding spikes there: picked, not changed
+    else ED.drag = { kind: 'aim', c, r, dir: ED.aim };
+    return true;
+  }
+  if (tool === 'slide') {                                              // drag to where they dash (on sliding spikes: change it)
+    const s = edTrapPartAt(c, r), o = s && s.part === 'slide' && edPartOf(s);
+    if (s) ED.sel = s;
+    if (!s || o) ED.drag = { kind: 'dash', c, r, c1: o ? c + o.move[0] : c, r1: o ? r + o.move[1] : r, slide: o ? s : null };
+    return true;
+  }
+  if (tool === 'flip') {
+    if (ED.flips.length >= ED_MAX.flips) setEditorStatus('A level keeps ' + ED_MAX.flips + ' flip zones', '#ffaa44');
+    else ED.drag = { kind: 'flipRect', c0: c, r0: r, c1: c, r1: r };
+    return true;
+  }
+  if (tool === 'text') {                                               // on a hint: change it; anywhere else: a new one there
+    const x = edTextAt(lx, ly);
+    if (x >= 0) ED.sel = { part: 'text', k: x };
+    ED.drag = { kind: 'text', c, r, k: x };
+    return true;
+  }
+  if (shift && tool !== 'start' && tool !== 'door') { ED.drag = { kind: 'rect', c0: c, r0: r, c1: c, r1: r }; return true; }
+  ED.drag = { kind: 'paint', last: { c, r } };
+  edPaint(c, r);
+  return true;
+}
+
+function edMove(px, py) {
+  const cell = edCell(px, py);
+  ED.hover = cell;
+  const d = ED.drag;
+  if (!d) return;
+  const lx = (px - ED_GRID_X) / ED_SCALE, ly = (py - ED_GRID_Y) / ED_SCALE;
+  const T = LK.TILE, clamp = LK.clamp;
+  if (d.kind === 'paint') {
+    const c = clamp(Math.floor(lx / T), 0, LK.COLS - 1), r = clamp(Math.floor(ly / T), 0, LK.ROWS - 1);
+    if (c !== d.last.c || r !== d.last.r) { edPaintLine(d.last, { c, r }, d.erase); d.last = { c, r }; }
+  }
+  if ((d.kind === 'rect' || d.kind === 'trig' || d.kind === 'flipRect') && cell) { d.c1 = cell.c; d.r1 = cell.r; }
+  if (d.kind === 'dash' && cell) { d.c1 = cell.c; d.r1 = cell.r; }
+  if (d.kind === 'aim') {
+    const cx = d.c * T + 30, cy = d.r * T + 30;
+    if (Math.hypot(lx - cx, ly - cy) > 28) d.dir = ((Math.round(Math.atan2(ly - cy, lx - cx) / (Math.PI / 4)) % 8) + 8) % 8;
+  }
+  if (d.kind === 'moveMark' && cell && (cell.c !== d.c || cell.r !== d.r) && !'PDX'.includes(ED.map[cell.r][cell.c])) {
+    ED.map[d.r][d.c] = d.under;
+    d.under = ED.map[cell.r][cell.c];
+    ED.map[cell.r][cell.c] = d.ch;
+    d.c = cell.c; d.r = cell.r;
+    ED.dirty = true;
+  }
+  const part = edPartOf(ED.sel);
+  if (d.kind === 'movePart' && cell && part && (part.c !== cell.c || part.r !== cell.r) && !edTrapPartAt(cell.c, cell.r)) {
+    part.c = cell.c; part.r = cell.r; ED.dirty = true;
+  }
+  if (d.kind === 'moveFlip' && cell && part) {
+    const nc = clamp(cell.c + d.dc, 0, LK.COLS - part.w), nr = clamp(cell.r + d.dr, 0, LK.ROWS - part.h);
+    if (nc !== part.c || nr !== part.r) { part.c = nc; part.r = nr; ED.dirty = true; }
+  }
+  if (d.kind === 'moveText' && part) {                                 // by 10 px, kept on the screen
+    const nx = clamp(Math.round((lx + d.dx) / 10) * 10, 0, LK.W), ny = clamp(Math.round((ly + d.dy) / 10) * 10, 0, LK.H);
+    if (nx !== part.x || ny !== part.y) { part.x = nx; part.y = ny; }
+  }
+  if (d.kind === 'moveTrig' && part) {
+    const c = part.w ? Math.round(lx / T + d.dx) : Math.round(lx / T + d.dx - 0.5) + 0.5, r = Math.round(ly / T + d.dy);
+    const nc = clamp(c, part.w ? 0 : 0.5, LK.COLS - (part.w || 0.5)), nr = clamp(r, 0, LK.ROWS - part.h);
+    if (nc !== part.c || nr !== part.r) { part.c = nc; part.r = nr; ED.dirty = true; }
+  }
+  if (d.kind === 'size' && part) {                                     // a trigger or a flip zone; a line stays a line
+    const w = part.w ? clamp(Math.round(lx / T - part.c), 1, LK.COLS - part.c) : 0;
+    const h = clamp(Math.round(ly / T - part.r), 1, LK.ROWS - part.r);
+    if (w !== part.w || h !== part.h) { part.w = w; part.h = h; ED.dirty = true; }
+  }
+}
+
+function edUp() {
+  const d = ED.drag;
+  ED.drag = null;
+  if (!d) return;
+  if (d.kind === 'rect') {
+    const q = edRectOf(d);
+    for (let r = q.r; r < q.r + q.h; r++) for (let c = q.c; c < q.c + q.w; c++) edPaint(c, r, d.erase);
+  }
+  if (d.kind === 'aim') {
+    ED.aim = d.dir;
+    if (d.spike) ED.traps[d.spike.t].spikes[d.spike.k].dir = LK.DIR_NAMES[d.dir];
+    else {
+      const s = { c: d.c, r: d.r, dir: LK.DIR_NAMES[d.dir], speed: LK.SPEEDS[ED.speed] }, tp = ED.join && edSelTrap();
+      if (ED_DELAYS[ED.delay]) s.delay = ED_DELAYS[ED.delay];
+      if (ED_REACHES[ED.reach]) s.travel = ED_REACHES[ED.reach];
+      const ref = tp && tp.spikes[0];                                    // joining a trap: at its speed, delay and reach
+      if (ref) for (const k of ['speed', 'delay', 'travel']) { if (ref[k]) s[k] = ref[k]; else delete s[k]; }
+      edAddToTrap('spike', s);
+    }
+  }
+  if (d.kind === 'dash') {
+    const move = [d.c1 - d.c, d.r1 - d.r];
+    if (!move[0] && !move[1]) { if (!d.slide) setEditorStatus('Drag from the spikes to where they dash', '#ffaa44'); }
+    else if (d.slide) edPartOf(d.slide).move = move;
+    else {
+      const tp = ED.join && edSelTrap(), ref = tp && tp.slides[0];
+      edAddToTrap('slide', { c: d.c, r: d.r, move, time: ref ? ref.time : ED_DASHES[ED.dash] });
+    }
+  }
+  if (d.kind === 'flipRect') {
+    const q = edRectOf(d);
+    ED.flips.push({ c: q.c, r: q.r, w: q.w, h: q.h, cool: ED_COOLS[ED.cool] });
+    ED.sel = { part: 'flip', k: ED.flips.length - 1 };
+  }
+  if (d.kind === 'trig') {
+    const tp = edSelTrap(), q = edRectOf(d);
+    if (tp) {
+      const g = ED.line ? { c: d.c0 + 0.5, r: q.r, w: 0, h: q.h } : { c: q.c, r: q.r, w: q.w, h: q.h };
+      if (tp.triggers.length ? tp.triggers[0].show : ED.show) g.show = true;
+      tp.triggers.push(g);
+      ED.sel = { t: ED.sel.t, part: 'trigger', k: tp.triggers.length - 1 };
+    }
+    ED.step = null;
+  }
+  if (ED.before && edSnapshot() !== ED.before) edPushUndo(ED.before);
+  ED.before = null;
+  ED.dirty = true;
+  if (d.kind === 'text') edWriteText(d.k >= 0 ? null : { c: d.c, r: d.r });
+}
+
+// A trap spike or sliding spikes just placed: they join the picked trap, or make a trap of their own (its trigger next).
+function edAddToTrap(part, s) {
+  const tp = ED.join && edSelTrap(), list = ED_LISTS[part];
+  if (tp) {
+    if (tp[list].length >= ED_MAX[list]) { setEditorStatus('A trap keeps ' + ED_MAX[list] + ' ' + list, '#ffaa44'); return; }
+    tp[list].push(s);
+    ED.sel = { t: ED.sel.t, part, k: tp[list].length - 1 };
+    return;
+  }
+  if (ED.traps.length >= ED_MAX.traps) { setEditorStatus('A level keeps ' + ED_MAX.traps + ' traps', '#ffaa44'); return; }
+  ED.traps.push({ spikes: part === 'spike' ? [s] : [], slides: part === 'slide' ? [s] : [], triggers: [] });
+  ED.sel = { t: ED.traps.length - 1, part, k: 0 };
+  ED.step = 'trigger';
+  ED.join = false;
+  setEditorStatus('Now drag the trigger that fires it. Right-click or ESC: no trigger for now.', '#ffdd33');
+}
+
+// A hint: a new one on a tile (at), or else the picked one's words.
+function edWriteText(at) {
+  const o = !at && edPicked('text');
+  if (!at && !o) return;
+  if (at && ED.text.length >= ED_MAX.text) { setEditorStatus('A level keeps ' + ED_MAX.text + ' hints', '#ffaa44'); return; }
+  ED.shift = ED.alt = false;
+  const v = window.prompt(o ? 'Change the hint (up to 80 characters):' : 'Write a hint (up to 80 characters).\n{move} and {jump} show the keys for them.', o ? o.s : '');
+  const s = v == null ? '' : String(v).trim().slice(0, 80);
+  if (!s) return;
+  edChange(() => {
+    if (o) { o.s = s; return; }
+    ED.text.push(Object.assign({ x: (at.c + 0.5) * LK.TILE, y: (at.r + 0.5) * LK.TILE, s, size: ED_TEXT_SIZES[ED.tsize][0] }, ED_SHOWS[ED.tshow]));
+    ED.sel = { part: 'text', k: ED.text.length - 1 };
+  });
+}
+
+// A new tool keeps the pick only if it works with it (so the panel shows the tool's own settings otherwise).
+const ED_KEEPS = { trap: ['spike', 'slide', 'trigger'], slide: ['spike', 'slide', 'trigger'], flip: ['flip'], text: ['text'] };
+function edSetTool(id) {
+  if (ED.tool === id) return;
+  ED.tool = id;
+  ED.step = null;
+  if (id !== 'trap' && id !== 'slide') ED.join = false;
+  if (ED.sel && id !== 'select' && !(ED_KEEPS[id] || []).includes(ED.sel.part)) { ED.sel = null; ED.join = false; }
+}
+
+// ===== SETTINGS: the picked trap's, flip zone's or hint's, or those new ones get =====
+
+const edSame = (list, f) => list.length && list.every(x => f(x) === f(list[0])) ? f(list[0]) : null;
+const edNext = (list, v) => list[(list.indexOf(v) + 1) % list.length];          // a value not in the list goes to the first
+const edSpeedName = v => { const i = LK.SPEEDS.indexOf(v); return i >= 0 ? LK.SPEED_NAMES[i] : v + ' px/s'; };
+const edReachName = v => v ? v + ' tile' + (v === 1 ? '' : 's') : 'to a wall';
+const edSizeName = v => (ED_TEXT_SIZES.find(s => s[0] === v) || [0, v + ' px'])[1];
+// When a hint shows: always, from some deaths on (min), or only until the first (max 0); a level file may have others.
+const edShowName = x => x.min == null && x.max == null ? 'always' : x.min == null && x.max === 0 ? 'before any death'
+  : x.max == null ? 'after ' + x.min + ' death' + (x.min === 1 ? '' : 's') : (x.min || 0) + ' to ' + x.max + ' deaths';
+
+function edCycleSpeed() {
+  const tp = edSelTrap();
+  if (!tp) { ED.speed = (ED.speed + 1) % LK.SPEEDS.length; return; }
+  const v = LK.SPEEDS[(LK.SPEEDS.indexOf(edSame(tp.spikes, s => s.speed)) + 1) % LK.SPEEDS.length];
+  edChange(() => tp.spikes.forEach(s => { s.speed = v; }));
+}
+function edCycleDelay() {
+  const tp = edSelTrap();
+  if (!tp) { ED.delay = (ED.delay + 1) % ED_DELAYS.length; return; }
+  const v = ED_DELAYS[(ED_DELAYS.indexOf(edSame(tp.spikes, s => s.delay || 0)) + 1) % ED_DELAYS.length];
+  edChange(() => tp.spikes.forEach(s => { if (v) s.delay = v; else delete s.delay; }));
+}
+function edCycleReach() {
+  const tp = edSelTrap();
+  if (!tp) { ED.reach = (ED.reach + 1) % ED_REACHES.length; return; }
+  const v = edNext(ED_REACHES, edSame(tp.spikes, s => s.travel || 0));
+  edChange(() => tp.spikes.forEach(s => { if (v) s.travel = v; else delete s.travel; }));
+}
+function edCycleDash() {
+  const tp = edSelTrap();
+  if (!tp) { ED.dash = (ED.dash + 1) % ED_DASHES.length; return; }
+  const v = edNext(ED_DASHES, edSame(tp.slides, s => s.time));
+  edChange(() => tp.slides.forEach(s => { s.time = v; }));
+}
+function edToggleShow() {
+  const tp = edSelTrap();
+  if (!tp || !tp.triggers.length) { ED.show = !ED.show; return; }
+  const v = !tp.triggers[0].show;
+  edChange(() => tp.triggers.forEach(g => { if (v) g.show = true; else delete g.show; }));
+}
+function edToggleOn() {
+  const tp = edSelTrap();
+  if (!tp || !tp.triggers.length) return;
+  const off = !tp.triggers.every(g => g.off);
+  edChange(() => tp.triggers.forEach(g => { if (off) g.off = true; else delete g.off; }));
+}
+function edToggleShape() {
+  ED.line = !ED.line;
+  const g = edPicked('trigger');
+  if (g) edChange(() => {                                              // the picked trigger changes shape too
+    if (ED.line && g.w) { g.c = Math.floor(g.c + g.w / 2) + 0.5; g.w = 0; }
+    else if (!ED.line && !g.w) { g.c = Math.floor(g.c); g.w = 1; }
+  });
+}
+function edCycleCool() {
+  const z = edPicked('flip');
+  if (!z) { ED.cool = (ED.cool + 1) % ED_COOLS.length; return; }
+  const v = edNext(ED_COOLS, z.cool);
+  edChange(() => { z.cool = v; });
+}
+function edCycleSize() {
+  const x = edPicked('text');
+  if (!x) { ED.tsize = (ED.tsize + 1) % ED_TEXT_SIZES.length; return; }
+  const v = edNext(ED_TEXT_SIZES.map(s => s[0]), x.size);
+  edChange(() => { x.size = v; });
+}
+function edCycleShows() {
+  const x = edPicked('text');
+  if (!x) { ED.tshow = (ED.tshow + 1) % ED_SHOWS.length; return; }
+  const o = ED_SHOWS[(ED_SHOWS.findIndex(s => s.min === x.min && s.max === x.max) + 1) % ED_SHOWS.length];
+  edChange(() => { delete x.min; delete x.max; Object.assign(x, o); });
+}
+function edCycleRespawn() {
+  const v = edNext(ED_RESPAWNS, ED.crumble);
+  edChange(() => { ED.crumble = v; });
+}
+// R turns the spikes the Spikes tool paints, or else the picked trap spike an eighth of a turn (SHIFT: the other way).
+function edTurn(back) {
+  const s = edPicked('spike');
+  if (ED.tool === 'spikes') { ED.sdir = (ED.sdir + (back ? 3 : 1)) % 4; return; }
+  if (s) edChange(() => { s.dir = LK.DIR_NAMES[(LK.dirIndex(s.dir) + (back ? 7 : 1)) % 8]; });
+  else { ED.aim = (ED.aim + (back ? 7 : 1)) % 8; setEditorStatus('New trap spikes shoot ' + LK.DIR_NAMES[ED.aim], '#ffdd33'); }
 }
 
 // ===== ENTERING / LEAVING =====
 
-function openEditor(level, returnState) {
-  editorDoc = levelToEditorDoc(level);
-  editorTool = 'block';
-  editorSelectedSpike = null;
-  editorDrag = null;
-  editorUndoStack = [];
-  editorRedoStack = [];
-  editorDirty = false;
-  editorNameEditing = false;
-  editorPreviewMode = false;
-  editorShowHelp = false;
-  editorReturnState = returnState || 'customLevels';
+function openEditor(rec, returnState) {
+  edLoad(rec);
+  ED.tool = 'solid';
+  ED.preview = false;
+  ED.help = false;
+  ED.naming = false;
+  ED.returnState = returnState || 'customLevels';
   customLevelSession = null;
-  setEditorStatus('Editing "' + editorDoc.name + '"', '#88ccff');
+  setEditorStatus('Editing "' + ED.name + '"', '#88ccff');
   transitionToState('editor');
 }
 
 function openEditorForNewLevel() {
-  const level = createNewCustomLevel('Untitled Level');
-  openEditor(level, 'customLevels');
-  editorDirty = true; // Never saved yet
+  openEditor(createNewCustomLevel('Untitled Level'), 'customLevels');
+  ED.unsaved = true; // Never saved yet
   setEditorStatus('New level - build it, then press SAVE', '#88ccff');
 }
 
 function saveEditorLevel(silent) {
-  if (!editorDoc) return false;
-  const saved = saveCustomLevel(editorDocToLevel(editorDoc));
+  if (!ED.map) return false;
+  const saved = saveCustomLevel(edRecord());
   if (!saved) return false;
-
-  editorDoc.id = saved.id;
-  editorDoc.created = saved.created;
-  editorDoc.stats = saved.stats;
-  editorDirty = false;
-  if (!silent) setEditorStatus('Saved "' + saved.name + '"', '#88ff88');
+  ED.rec = { id: saved.id, created: saved.created, stats: saved.stats };
+  ED.unsaved = false;
+  if (!silent) setEditorStatus('Saved "' + saved.level.name + '"', '#88ff88');
   return true;
 }
 
 function leaveEditor() {
-  if (editorDirty) {
+  if (ED.unsaved) {
     const choice = confirm('You have unsaved changes.\n\nOK = save and leave\nCancel = keep editing');
     if (!choice) return;
     if (!saveEditorLevel(true)) return;
   }
-  const target = editorReturnState;
-  editorDoc = null;
-  editorDrag = null;
-  transitionToState(target);
+  ED.drag = null;
+  transitionToState(ED.returnState);
+}
+
+// Esc: the drag, then the trigger step, then the pick, then out.
+function edEscape() {
+  if (ED.drag) return;
+  if (ED.help) ED.help = false;
+  else if (ED.step || ED.join) { ED.step = null; ED.join = false; }
+  else if (ED.sel) ED.sel = null;
+  else leaveEditor();
 }
 
 // Test-play the level straight from the editor
 function editorTestPlay() {
-  if (!editorDoc) return;
-  if (editorHasErrors()) {
-    const first = validateEditorDoc().find(p => p.level === 'error');
-    setEditorStatus(first.text, '#ff6666');
-    return;
-  }
+  if (!ED.map) return;
+  const bad = LK.checkLevel(edLevel()).find(p => p.bad);
+  if (bad) { setEditorStatus(bad.text, '#ff6666'); return; }
   // Auto-save so a crash or a reload never loses the work being tested
   saveEditorLevel(true);
-  editorDrag = null; // Never carry a half-finished drag into the test
-  startCustomLevelSession(editorDocToLevel(editorDoc), 'editor');
+  ED.drag = null;
+  ED.step = null;
+  startCustomLevelSession(edRecord(), 'editor');
 }
 
-// ===== COORDINATE HELPERS =====
-// "World" = the coordinates the real game uses (60px tiles, 1200x720).
-// "Screen" = where that ends up inside the editor's shrunken view.
-
-function edWorldToScreenX(wx) { return ED_GRID_X + wx * ED_SCALE; }
-function edWorldToScreenY(wy) { return ED_GRID_Y + wy * ED_SCALE; }
-function edScreenToWorldX(sx) { return (sx - ED_GRID_X) / ED_SCALE; }
-function edScreenToWorldY(sy) { return (sy - ED_GRID_Y) / ED_SCALE; }
-
-function edPointInGrid(x, y) {
-  return x >= ED_GRID_X && x < ED_GRID_X + ED_GRID_W &&
-         y >= ED_GRID_Y && y < ED_GRID_Y + ED_GRID_H;
+function editorShare() {
+  if (!ED.map) return;
+  const text = levelShareText(edLevel()), what = text.includes('#lvl=') ? 'link' : 'code';
+  copyShareText(text, ok => setEditorStatus(ok ? 'Share ' + what + ' copied - LOAD CODE opens it here, Load from code in the full game' : 'Share ' + what + ' shown', '#88ff88'));
 }
 
-function edScreenToCell(x, y) {
-  const col = Math.floor((x - ED_GRID_X) / ED_TILE);
-  const row = Math.floor((y - ED_GRID_Y) / ED_TILE);
-  if (col < 0 || col >= EDITOR_COLS || row < 0 || row >= EDITOR_ROWS) return null;
-  return { row, col };
+function clearEditorLevel() {
+  if (!confirm('Clear the whole level?\nThis can still be undone with CTRL+Z.')) return;
+  edChange(() => {
+    ED.map = ED.map.map(row => row.map(() => '.'));
+    ED.traps = [];
+    ED.flips = [];
+    ED.text = [];
+    ED.sel = ED.step = null;
+    ED.join = false;
+  });
+  setEditorStatus('Level cleared', '#ffaa66');
 }
 
-function edSnap(value, step) {
-  return Math.round(value / step) * step;
-}
+// ===== LAYOUT: every button, rebuilt each frame and used for hit tests =====
 
-// Bounding boxes of connected G/g tiles - exactly how parseLevel() groups them,
-// so the editor preview matches the real zone the player will hit.
-function computeGravityZoneBoxes(grid) {
-  const seen = new Set();
-  const boxes = [];
-
-  for (let row = 0; row < grid.length; row++) {
-    for (let col = 0; col < grid[row].length; col++) {
-      const char = grid[row][col];
-      if (char !== 'G' && char !== 'g') continue;
-      if (seen.has(row + ',' + col)) continue;
-
-      const box = { minRow: row, maxRow: row, minCol: col, maxCol: col };
-      const stack = [{ row, col }];
-
-      while (stack.length > 0) {
-        const cur = stack.pop();
-        const key = cur.row + ',' + cur.col;
-        if (seen.has(key)) continue;
-        seen.add(key);
-
-        box.minRow = Math.min(box.minRow, cur.row);
-        box.maxRow = Math.max(box.maxRow, cur.row);
-        box.minCol = Math.min(box.minCol, cur.col);
-        box.maxCol = Math.max(box.maxCol, cur.col);
-
-        [[0, 1], [0, -1], [1, 0], [-1, 0]].forEach(([dr, dc]) => {
-          const nr = cur.row + dr;
-          const nc = cur.col + dc;
-          if (nr < 0 || nr >= grid.length || nc < 0 || nc >= grid[nr].length) return;
-          const nChar = grid[nr][nc];
-          if ((nChar === 'G' || nChar === 'g') && !seen.has(nr + ',' + nc)) {
-            stack.push({ row: nr, col: nc });
-          }
-        });
-      }
-      boxes.push(box);
-    }
+function edPaletteLayout() {
+  const tools = [], heads = [];
+  let y = ED_TOPBAR_H + 10;
+  for (const g of ED_GROUPS) {
+    heads.push({ n: g.n, y: y + 6, col: g.col });
+    y += 14;
+    g.tools.forEach((id, i) => tools.push({ id, col: g.col, x: 8 + i * 54, y, w: 50, h: 40 }));
+    y += 46;
   }
-  return boxes;
+  return { tools, heads, end: y };
 }
-
-// Where a spike's handles live, in world coordinates.
-function getSpikeGeometry(row, col) {
-  const digit = parseInt(editorDoc.grid[row][col], 10) || 0;
-  const meta = getSpikeMeta(row, col);
-
-  const x = col * TILE_SIZE;
-  const y = row * TILE_SIZE;
-  const spikeTop = y + 20;
-  const moveDistance = digit * TILE_SIZE;
-  const vector = getSpikeDirectionVector(meta.dir);
-
-  const triggerX = x + meta.area.x;
-  const triggerY = y + meta.area.y;
-  const triggerW = meta.area.w;
-  const triggerH = meta.area.h;
-
-  return {
-    digit, meta, x, y, spikeTop, moveDistance, vector,
-    triggerX, triggerY, triggerW, triggerH,
-    // A zero-width trigger that spans the whole map is the classic default
-    isFull: triggerW === 0 && triggerY <= 0.001 && triggerY + triggerH >= GAME_HEIGHT - 0.001,
-    isLine: triggerW === 0,
-    // Where the spike ends up once it fires
-    ghostX: x + vector.dx * moveDistance,
-    ghostY: spikeTop + vector.dy * moveDistance
-  };
-}
-
-// Human-readable summary of a trigger rectangle, used in the status bar
-function describeTrigger(g) {
-  if (g.isFull) return 'full height line';
-  if (g.isLine) return 'line ' + Math.round(g.triggerH) + 'px tall';
-  return 'box ' + Math.round(g.triggerW) + ' x ' + Math.round(g.triggerH) + 'px';
-}
-
-// ===== LAYOUT (buttons are rebuilt every frame and reused for hit-testing) =====
 
 function buildEditorLayout() {
-  const b = [];
-  const push = (id, x, y, w, h, extra) => b.push(Object.assign({ id, x, y, w, h }, extra || {}));
+  const list = [];
+  const add = o => { list.push(o); return o; };
 
   // --- top bar ---
-  push('back', 10, 10, 88, 36);
-  push('name', 106, 10, 270, 36);
-  CUSTOM_VISUAL_STYLES.forEach((style, i) => {
-    push('style:' + style.id, 384 + i * 86, 10, 80, 36, { style: style.id, label: style.label });
-  });
-  push('preview', 644, 10, 116, 36);
-  push('help', 766, 10, 56, 36);
-  push('test', 830, 10, 168, 36);
-  push('save', 1006, 10, 184, 36);
+  add({ x: 10, y: 10, w: 88, h: 36, label: '◀ BACK', font: 14, action: leaveEditor });
+  add({ x: 106, y: 10, w: 250, h: 36, kind: 'name', action: () => { ED.naming = true; ED.blink = 0; } });
+  CUSTOM_VISUAL_STYLES.forEach((style, i) => add({ x: 364 + i * 84, y: 10, w: 80, h: 36, label: style.label, font: 13, active: ED.style === style.id,
+    activeColor: '#5b3f8f', borderColor: '#bb88ff', action: () => { if (ED.style !== style.id) { edChange(() => { ED.style = style.id; }); setEditorStatus('Look: ' + style.label, '#cc99ff'); } } }));
+  add({ x: 620, y: 10, w: 96, h: 36, label: ED.preview ? 'EDIT VIEW' : 'PREVIEW', font: 13, active: ED.preview, activeColor: '#7a6a1f', borderColor: '#ffdd66',
+    action: () => { ED.preview = !ED.preview; } });
+  add({ x: 722, y: 10, w: 44, h: 36, label: '?', font: 20, active: ED.help, action: () => { ED.help = !ED.help; } });
+  add({ x: 772, y: 10, w: 90, h: 36, label: 'SHARE', font: 14, action: editorShare });
+  const blocked = ED.problems.some(p => p.bad);
+  add({ x: 868, y: 10, w: 152, h: 36, label: '▶ TEST PLAY', font: 16, active: !blocked, activeColor: '#2f7a3f', borderColor: '#66ff99',
+    disabled: blocked, action: editorTestPlay });
+  add({ x: 1026, y: 10, w: 164, h: 36, label: ED.unsaved ? 'SAVE •' : 'SAVED', font: 16, active: ED.unsaved, activeColor: '#2f5f9a', borderColor: '#88ccff',
+    action: () => saveEditorLevel(false) });
 
-  // --- tool palette ---
-  EDITOR_TOOLS.forEach((tool, i) => {
-    push('tool:' + tool.id, 8, ED_TOOLS_Y + i * ED_TOOL_STEP, 174, ED_TOOL_H, { tool: tool.id });
-  });
+  // --- the palette ---
+  const P = edPaletteLayout();
+  for (const b of P.tools) add({ x: b.x, y: b.y, w: b.w, h: b.h, icon: b.id, active: ED.tool === b.id, activeColor: '#33334a', borderColor: b.col,
+    action: () => edSetTool(b.id) });
 
-  // --- spike controls (only while the spike tool or a spike is in play) ---
-  if (editorSpikeControlsVisible()) {
-    // Range: how many tiles it travels
-    for (let d = 0; d <= 9; d++) {
-      const cx = 12 + (d % 5) * 35;
-      const cy = ED_SPIKE_Y + 18 + Math.floor(d / 5) * 30;
-      push('spikeDist:' + d, cx, cy, 32, 26, { distance: d });
-    }
-
-    // Direction: a 3x3 pad of arrows
-    ED_DIRECTION_PAD.forEach((padRow, r) => {
-      padRow.forEach((dir, c) => {
-        if (!dir) return;
-        push('spikeDir:' + dir, 12 + c * 27, ED_SPIKE_DIR_Y + r * 27, 25, 25, { direction: dir });
-      });
-    });
-
-    // Speed: a stepper along a short ladder of useful speeds
-    push('spikeSpeed:down', 102, ED_SPIKE_DIR_Y, 24, 25, { step: -1 });
-    push('spikeSpeed:up', 160, ED_SPIKE_DIR_Y, 24, 25, { step: 1 });
-  }
+  // --- the panel: the picked trap, flip zone or hint, or the tool's settings ---
+  let y = ED_PANEL_Y + 26;
+  const row = (label, action, o) => { add(Object.assign({ x: 8, y, w: 210, h: 30, label, action, font: 13 }, o || {})); y += 34; };
+  const pair = (a, b) => {
+    add(Object.assign({ x: 8, y, w: 103, h: 30, font: 12 }, a));
+    add(Object.assign({ x: 115, y, w: 103, h: 30, font: 12 }, b));
+    y += 34;
+  };
+  const red = { textColor: '#ff9999' };
+  const tp = edSelTrap(), flip = edPicked('flip'), hint = edPicked('text');
+  if (tp) {
+    const col = edTrapColor(ED.sel.t), sp = edSame(tp.spikes, s => s.speed), dl = edSame(tp.spikes, s => s.delay || 0), tr = tp.triggers;
+    const rc = edSame(tp.spikes, s => s.travel || 0), dt = edSame(tp.slides, s => s.time), noS = !tp.spikes.length, noD = !tp.slides.length;
+    const tint = { borderColor: col };
+    pair(Object.assign({ label: 'Speed: ' + (noS ? '–' : sp == null ? 'mixed' : edSpeedName(sp)), action: edCycleSpeed, disabled: noS }, tint),
+      Object.assign({ label: 'Delay: ' + (noS ? '–' : dl == null ? 'mixed' : dl + ' s'), action: edCycleDelay, disabled: noS }, tint));
+    pair(Object.assign({ label: 'Reach: ' + (noS ? '–' : rc == null ? 'mixed' : edReachName(rc)), action: edCycleReach, disabled: noS }, tint),
+      Object.assign({ label: 'Dash: ' + (noD ? '–' : dt == null ? 'mixed' : dt + ' s'), action: edCycleDash, disabled: noD }, tint));
+    pair(Object.assign({ label: 'Trigger: ' + (!tr.length ? 'none' : tr.every(g => g.off) ? 'off' : 'on'), action: edToggleOn, disabled: !tr.length }, tint),
+      Object.assign({ label: 'Visible: ' + (!tr.length ? '–' : tr[0].show ? 'yes' : 'no'), action: edToggleShow, disabled: !tr.length }, tint));
+    row('New triggers: ' + (ED.line ? 'line' : 'box'), edToggleShape, tint);
+    pair(Object.assign({ label: ED.join ? 'Adding…' : '+ Spikes', active: ED.join, activeColor: '#3a3450',
+      action: () => { ED.join = !ED.join; ED.step = null; if (ED.join && ED.tool !== 'slide') ED.tool = ED.sel.part === 'slide' ? 'slide' : 'trap'; } }, tint),
+      Object.assign({ label: ED.step ? 'Drawing…' : '+ Trigger', active: !!ED.step, activeColor: '#3a3450',
+        action: () => { ED.step = ED.step ? null : 'trigger'; ED.join = false; } }, tint));
+    pair(Object.assign({ label: 'Delete ' + ED.sel.part, action: edRemoveSelected }, red), Object.assign({ label: 'Delete trap', action: edRemoveTrap }, red));
+  } else if (flip) {
+    row('Wait between flips: ' + flip.cool + ' s', edCycleCool);
+    row('Delete flip zone', edRemoveSelected, red);
+  } else if (hint) {
+    row('Change the words', () => edWriteText(null));
+    row('Size: ' + edSizeName(hint.size), edCycleSize);
+    row('Shows: ' + edShowName(hint), edCycleShows);
+    row('Delete hint', edRemoveSelected, red);
+  } else if (ED.tool === 'trap') {
+    pair({ label: 'Speed: ' + LK.SPEED_NAMES[ED.speed], action: edCycleSpeed }, { label: 'Delay: ' + ED_DELAYS[ED.delay] + ' s', action: edCycleDelay });
+    row('Reach: ' + edReachName(ED_REACHES[ED.reach]), edCycleReach);
+    row('Trigger visible: ' + (ED.show ? 'yes' : 'no'), edToggleShow);
+    row('Trigger shape: ' + (ED.line ? 'line' : 'box'), edToggleShape);
+  } else if (ED.tool === 'slide') {
+    row('Dash: ' + ED_DASHES[ED.dash] + ' s', edCycleDash);
+    row('Trigger visible: ' + (ED.show ? 'yes' : 'no'), edToggleShow);
+    row('Trigger shape: ' + (ED.line ? 'line' : 'box'), edToggleShape);
+  } else if (ED.tool === 'spikes') row('Direction: ' + ['↑ up', '→ right', '↓ down', '← left'][ED.sdir], () => edTurn(false));
+  else if (ED.tool === 'flip') row('Wait between flips: ' + ED_COOLS[ED.cool] + ' s', edCycleCool);
+  else if (ED.tool === 'text') { row('Size: ' + edSizeName(ED_TEXT_SIZES[ED.tsize][0]), edCycleSize); row('Shows: ' + edShowName(ED_SHOWS[ED.tshow]), edCycleShows); }
+  else if (ED.tool === 'crumble') row('Comes back: ' + (ED.crumble ? 'after ' + ED.crumble + ' s' : 'never'), edCycleRespawn);
+  ED.panelEnd = y;
 
   // --- bottom bar ---
-  push('grid', 806, 684, 66, 28);
-  push('undo', 878, 684, 66, 28);
-  push('redo', 950, 684, 66, 28);
-  push('clear', 1022, 684, 78, 28);
-  push('fullscreen', 1108, 684, 82, 28);
+  add({ x: 806, y: 684, w: 66, h: 28, label: 'GRID', font: 12, active: ED.grid, action: () => { ED.grid = !ED.grid; } });
+  add({ x: 878, y: 684, w: 66, h: 28, label: 'UNDO', font: 12, disabled: !ED.undo.length, action: editorUndo });
+  add({ x: 950, y: 684, w: 66, h: 28, label: 'REDO', font: 12, disabled: !ED.redo.length, action: editorRedo });
+  add({ x: 1022, y: 684, w: 78, h: 28, label: 'CLEAR', font: 12, textColor: '#ff9999', action: clearEditorLevel });
+  add({ x: 1108, y: 684, w: 82, h: 28, label: isFullscreenActive() ? 'WINDOW' : 'FULL', font: 12, active: isFullscreenActive(),
+    activeColor: '#2f6f68', borderColor: '#44ddcc', action: toggleFullscreen });
 
-  editorButtons = b;
-  return b;
-}
-
-// The spike section of the palette is only worth the room when a spike is
-// selected or about to be placed.
-function editorSpikeControlsVisible() {
-  return editorTool === 'spike' || !!editorSelectedSpike;
-}
-
-// A short ladder of speeds, so the stepper reaches the extremes in a few clicks
-const ED_SPEED_LADDER = [0.5, 1, 1.5, 2, 3, 4, 5, 6, 8, 10, 14, 20];
-
-function edSpeedStep(speed, step) {
-  let index = 0;
-  let bestGap = Infinity;
-  ED_SPEED_LADDER.forEach((value, i) => {
-    const gap = Math.abs(value - speed);
-    if (gap < bestGap) {
-      bestGap = gap;
-      index = i;
-    }
-  });
-  const next = Math.max(0, Math.min(ED_SPEED_LADDER.length - 1, index + step));
-  return ED_SPEED_LADDER[next];
-}
-
-// What the palette is currently showing: the selected spike, or the settings a
-// newly placed spike will get.
-function editorActiveSpikeSettings() {
-  if (editorSelectedSpike && isSpikeChar(editorDoc.grid[editorSelectedSpike.row][editorSelectedSpike.col])) {
-    const meta = getSpikeMeta(editorSelectedSpike.row, editorSelectedSpike.col);
-    return {
-      selected: true,
-      distance: parseInt(editorDoc.grid[editorSelectedSpike.row][editorSelectedSpike.col], 10) || 0,
-      dir: meta.dir,
-      speed: meta.speed
-    };
-  }
-  return {
-    selected: false,
-    distance: editorSpikeDistance,
-    dir: editorSpikeDirection,
-    speed: editorSpikeSpeed
-  };
+  ED.buttons = list;
+  return list;
 }
 
 function edButtonAt(x, y) {
-  for (let i = editorButtons.length - 1; i >= 0; i--) {
-    const btn = editorButtons[i];
-    if (x >= btn.x && x <= btn.x + btn.w && y >= btn.y && y <= btn.y + btn.h) return btn;
+  for (let i = ED.buttons.length - 1; i >= 0; i--) {
+    const b = ED.buttons[i];
+    if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b;
   }
   return null;
 }
 
 // ===== SMALL DRAW HELPERS =====
 
-function edDrawButton(btn, label, opts) {
-  const o = opts || {};
-  const hovered = editorMouse.x >= btn.x && editorMouse.x <= btn.x + btn.w &&
-                  editorMouse.y >= btn.y && editorMouse.y <= btn.y + btn.h;
+function edText(s, x, y, px, o) {
+  o = o || {};
+  ctx.save();
+  ctx.font = (o.bold === false ? '' : 'bold ') + px + 'px ' + (o.fam || 'Arial, sans-serif');
+  ctx.textAlign = o.align || 'left';
+  ctx.textBaseline = o.base || 'middle';
+  if (o.a != null) ctx.globalAlpha *= o.a;
+  if (o.max) { const w = ctx.measureText(s).width; if (w > o.max) ctx.font = (o.bold === false ? '' : 'bold ') + (px * o.max / w) + 'px ' + (o.fam || 'Arial, sans-serif'); }
+  ctx.fillStyle = o.color || '#fff';
+  ctx.fillText(s, x, y);
+  ctx.restore();
+}
 
-  let fill = o.active ? (o.activeColor || '#3b5c8f') : '#2e2e38';
-  if (o.disabled) fill = '#232329';
-  else if (hovered) fill = o.active ? (o.activeColor || '#456ba6') : '#3c3c49';
-
+function edDrawButton(b) {
+  const m = ED.mouse;
+  const hovered = !b.disabled && m.x >= b.x && m.x <= b.x + b.w && m.y >= b.y && m.y <= b.y + b.h;
+  let fill = b.active ? (b.activeColor || '#3b5c8f') : '#2e2e38';
+  if (b.disabled) fill = '#232329';
+  else if (hovered) fill = b.active ? (b.activeColor || '#456ba6') : '#3c3c49';
   ctx.fillStyle = fill;
-  ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
-  ctx.strokeStyle = o.disabled ? '#333340' : (o.active ? (o.borderColor || '#88bbff') : (hovered ? '#7a7a8c' : '#4a4a58'));
-  ctx.lineWidth = o.active ? 2 : 1;
-  ctx.strokeRect(btn.x + 0.5, btn.y + 0.5, btn.w - 1, btn.h - 1);
-
-  if (label) {
-    ctx.fillStyle = o.disabled ? '#555560' : (o.textColor || '#e8e8f0');
-    ctx.font = o.font || 'bold 15px Arial, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(label, btn.x + btn.w / 2, btn.y + btn.h / 2 + 1);
-    ctx.textBaseline = 'alphabetic';
-    ctx.textAlign = 'left';
-  }
+  ctx.fillRect(b.x, b.y, b.w, b.h);
+  ctx.strokeStyle = b.disabled ? '#333340' : b.active ? (b.borderColor || '#88bbff') : hovered ? '#7a7a8c' : (b.borderColor ? lkRgba(b.borderColor, 0.45) : '#4a4a58');
+  ctx.lineWidth = b.active ? 2 : 1;
+  ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
+  if (b.label) edText(b.label, b.x + b.w / 2, b.y + b.h / 2 + 1, b.font || 15, { align: 'center', color: b.disabled ? '#555560' : (b.textColor || '#e8e8f0'), max: b.w - 8 });
   return hovered;
 }
 
-function edDrawTileIcon(x, y, size, tool) {
-  const style = editorDoc ? editorDoc.visualStyle : 'default';
-
+// A small picture of what a tool puts down, in the level's look, size px square.
+function edDrawToolIcon(id, x, y, size) {
+  const look = LK_LOOK[ED.style];
   ctx.save();
   ctx.beginPath();
   ctx.rect(x, y, size, size);
   ctx.clip();
+  ctx.fillStyle = ED.style === 'paper' ? '#f5f5dc' : ED.style === 'neon' ? '#0d0b20' : '#2a2a2a';
+  ctx.fillRect(x, y, size, size);
   ctx.translate(x, y);
-  ctx.scale(size / TILE_SIZE, size / TILE_SIZE);
-
-  switch (tool.id) {
-    case 'block':
-      drawStyledPlatform(0, 0, TILE_SIZE, TILE_SIZE, style, false);
-      break;
-    case 'fake':
-      drawStyledPlatform(0, 0, TILE_SIZE, TILE_SIZE, style, true);
-      break;
-    case 'invisible':
-      ctx.fillStyle = 'rgba(68, 221, 221, 0.22)';
-      ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
-      ctx.strokeStyle = '#44dddd';
-      ctx.lineWidth = 3;
-      ctx.setLineDash([8, 6]);
-      ctx.strokeRect(3, 3, TILE_SIZE - 6, TILE_SIZE - 6);
-      ctx.setLineDash([]);
-      break;
-    case 'crumble':
-      drawStyledCrumblingPlatform({ x: 0, y: 0, width: TILE_SIZE, height: TILE_SIZE, state: 'solid', timer: 0, alpha: 1 }, style);
-      break;
-    case 'spike':
-      drawStyledSpike({ x: 0, y: 8, width: TILE_SIZE, height: TILE_SIZE - 12, moving: false, moved: false }, style);
-      break;
-    case 'gravity':
-      ctx.fillStyle = 'rgba(140, 102, 255, 0.35)';
-      ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
-      ctx.strokeStyle = '#8c66ff';
-      ctx.lineWidth = 3;
-      ctx.strokeRect(2, 2, TILE_SIZE - 4, TILE_SIZE - 4);
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.moveTo(TILE_SIZE / 2, 14);
-      ctx.lineTo(TILE_SIZE / 2 - 12, 40);
-      ctx.lineTo(TILE_SIZE / 2 + 12, 40);
-      ctx.closePath();
-      ctx.fill();
-      break;
-    case 'spawn':
-      drawStyledPlayer(8, 8, 44, 44, style);
-      break;
-    case 'door':
-      drawStyledDoor({ x: 0, y: 0, width: TILE_SIZE, height: TILE_SIZE }, style);
-      break;
-    case 'erase':
-      ctx.strokeStyle = '#888894';
-      ctx.lineWidth = 4;
-      ctx.setLineDash([7, 7]);
-      ctx.strokeRect(5, 5, TILE_SIZE - 10, TILE_SIZE - 10);
-      ctx.setLineDash([]);
-      break;
+  ctx.scale(size / 60, size / 60);
+  const ink = ED.style === 'paper' ? '#161616' : '#ffffff';
+  const chevrons = (col, dir) => {
+    ctx.strokeStyle = col; ctx.lineWidth = 4; ctx.beginPath();
+    for (const cy of [20, 38]) { ctx.moveTo(18, cy + 6 * dir); ctx.lineTo(30, cy - 6 * dir); ctx.lineTo(42, cy + 6 * dir); }
+    ctx.stroke();
+  };
+  const door = () => drawStyledDoor({ x: 16, y: 6, width: 28, height: 48 }, look);
+  switch (id) {
     case 'select':
       ctx.fillStyle = '#ffcc44';
       ctx.beginPath();
-      ctx.moveTo(16, 10);
-      ctx.lineTo(16, 48);
-      ctx.lineTo(26, 38);
-      ctx.lineTo(34, 50);
-      ctx.lineTo(41, 46);
-      ctx.lineTo(33, 34);
-      ctx.lineTo(45, 32);
-      ctx.closePath();
-      ctx.fill();
+      ctx.moveTo(20, 10); ctx.lineTo(20, 48); ctx.lineTo(30, 38); ctx.lineTo(38, 50); ctx.lineTo(45, 46); ctx.lineTo(37, 34); ctx.lineTo(49, 32);
+      ctx.closePath(); ctx.fill();
+      break;
+    case 'erase':
+      ctx.strokeStyle = '#888894'; ctx.lineWidth = 4; ctx.setLineDash([7, 7]);
+      ctx.strokeRect(8, 8, 44, 44); ctx.setLineDash([]);
+      ctx.strokeStyle = '#ff8899'; ctx.beginPath(); ctx.moveTo(18, 18); ctx.lineTo(42, 42); ctx.moveTo(42, 18); ctx.lineTo(18, 42); ctx.stroke();
+      break;
+    case 'solid': drawStyledPlatform(6, 6, 48, 48, look, false); break;
+    case 'fake':
+      drawStyledPlatform(6, 6, 48, 48, look, true); ctx.shadowBlur = 0;
+      ctx.strokeStyle = '#ff5fd2'; ctx.lineWidth = 3; ctx.setLineDash([6, 4]); ctx.strokeRect(6, 6, 48, 48); ctx.setLineDash([]);
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(30, 16); ctx.lineTo(30, 42); ctx.moveTo(21, 34); ctx.lineTo(30, 44); ctx.lineTo(39, 34); ctx.stroke();
+      break;
+    case 'invisible':
+      ctx.fillStyle = 'rgba(68, 221, 221, 0.22)'; ctx.fillRect(6, 6, 48, 48);
+      ctx.strokeStyle = '#44dddd'; ctx.lineWidth = 3; ctx.setLineDash([8, 6]); ctx.strokeRect(7, 7, 46, 46); ctx.setLineDash([]);
+      break;
+    case 'crumble':
+      drawStyledCrumblingPlatform({ x: 6, y: 6, width: 48, height: 48, state: 'crumbling', timer: 0.4, alpha: 1 }, look);
+      break;
+    case 'spikes':
+      ctx.translate(30, 30); ctx.rotate(LK_SPIKE_ROT['^>v<'[ED.sdir]]);
+      drawStyledSpike({ x: -26, y: -8, width: 52, height: 34, moving: false }, look);
+      break;
+    case 'trap':
+      drawStyledPlatform(2, 14, 16, 32, look, false); ctx.shadowBlur = 0;
+      ctx.fillStyle = '#ff3355'; ctx.beginPath(); ctx.moveTo(48, 30); ctx.lineTo(20, 18); ctx.lineTo(20, 42); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#ffcc33'; ctx.lineWidth = 3; ctx.setLineDash([4, 4]); ctx.strokeRect(40, 4, 16, 16); ctx.setLineDash([]);
+      break;
+    case 'slide':
+      drawStyledSpike({ x: 4, y: 32, width: 34, height: 24, moving: false }, look); ctx.shadowBlur = 0;
+      ctx.strokeStyle = ink; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(30, 16); ctx.lineTo(52, 16); ctx.moveTo(44, 8); ctx.lineTo(53, 16); ctx.lineTo(44, 24); ctx.stroke();
+      break;
+    case 'gravityUp':
+    case 'gravityDown': {
+      const up = id === 'gravityUp', col = up ? '#44ddff' : '#ff44dd';
+      ctx.fillStyle = lkRgba(col, 0.25); ctx.fillRect(14, 0, 32, 60);
+      ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(14, 60); ctx.moveTo(46, 0); ctx.lineTo(46, 60); ctx.stroke();
+      chevrons(col, up ? 1 : -1);
+      break;
+    }
+    case 'flip':
+      ctx.fillStyle = 'rgba(68,221,255,.25)'; ctx.fillRect(6, 6, 24, 48);
+      ctx.fillStyle = 'rgba(255,68,221,.25)'; ctx.fillRect(30, 6, 24, 48);
+      ctx.strokeStyle = ink; ctx.lineWidth = 3; ctx.setLineDash([6, 4]); ctx.strokeRect(6, 6, 48, 48); ctx.setLineDash([]);
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = '#44ddff'; ctx.beginPath(); ctx.moveTo(18, 44); ctx.lineTo(18, 16); ctx.moveTo(11, 24); ctx.lineTo(18, 15); ctx.lineTo(25, 24); ctx.stroke();
+      ctx.strokeStyle = '#ff44dd'; ctx.beginPath(); ctx.moveTo(42, 16); ctx.lineTo(42, 44); ctx.moveTo(35, 36); ctx.lineTo(42, 45); ctx.lineTo(49, 36); ctx.stroke();
+      break;
+    case 'start': drawPlayer(12, 12, 36, 36); break;
+    case 'door': door(); break;
+    case 'decoy':
+      door(); ctx.shadowBlur = 0;
+      ctx.strokeStyle = '#ff3355'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(12, 14); ctx.lineTo(48, 50); ctx.moveTo(48, 14); ctx.lineTo(12, 50); ctx.stroke();
+      break;
+    case 'text':
+      edText('Aa', 30, 30, 28, { align: 'center', color: ink });
+      ctx.strokeStyle = lkRgba(ED.style === 'paper' ? '#161616' : '#ffffff', 0.5); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(10, 50); ctx.lineTo(50, 50); ctx.stroke();
       break;
   }
-
   ctx.restore();
   ctx.shadowBlur = 0;
   ctx.globalAlpha = 1;
@@ -760,427 +962,251 @@ function edWrapText(text, x, y, maxWidth, lineHeight, maxLines) {
 // ===== MAIN DRAW =====
 
 function drawEditor() {
-  if (!editorDoc) return;
+  if (!ED.map) return;
+  if (ED.dirty || !ED.lv) {
+    ED.lv = edLevel();
+    ED.L = LK.buildLevel(ED.lv);
+    ED.problems = LK.checkLevel(ED.lv);
+    ED.dirty = false;
+  }
   buildEditorLayout();
 
   // Editor chrome background
   ctx.fillStyle = '#16161d';
   ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-  drawEditorGridArea();
+  drawEditorMap();
   drawEditorTopBar();
   drawEditorPalette();
   drawEditorBottomBar();
 
-  if (editorShowHelp) drawEditorHelpOverlay();
+  if (ED.help) drawEditorHelpOverlay();
 }
 
-// --- the level itself, drawn with the real game renderers ---
-function drawEditorGridArea() {
-  const style = editorDoc.visualStyle;
-  const grid = editorDoc.grid;
-
+// --- the level itself, drawn by the code that plays it, and over it the traps and what is being dragged ---
+function drawEditorMap() {
+  const t = ED.time, paper = ED.style === 'paper', trapColor = i => edTrapColor(i, paper);
   ctx.save();
   ctx.beginPath();
   ctx.rect(ED_GRID_X, ED_GRID_Y, ED_GRID_W, ED_GRID_H);
   ctx.clip();
-
-  // --- world-space pass: everything the player will actually see ---
-  ctx.save();
   ctx.translate(ED_GRID_X, ED_GRID_Y);
   ctx.scale(ED_SCALE, ED_SCALE);
 
-  drawStyledBackground(style);
+  drawLevelScene(ED.L, ED.lv, ED.style, t, ED.preview ? { deaths: 0 } : { edit: true, trapColor });
+  if (ED.lv.start) {                                    // the square, on its start
+    const sp = ED.L.spawn;
+    ctx.globalAlpha = 0.85;
+    drawPlayer(sp.x, sp.y, LK.PHYS.size, LK.PHYS.size);
+    ctx.globalAlpha = 1;
+  }
 
-  const tileAt = (r, c) => ({ x: c * TILE_SIZE, y: r * TILE_SIZE, width: TILE_SIZE, height: TILE_SIZE });
-
-  // Solid platforms
-  for (let r = 0; r < grid.length; r++) {
-    for (let c = 0; c < grid[r].length; c++) {
-      if (grid[r][c] === '#') {
-        const t = tileAt(r, c);
-        drawStyledPlatform(t.x, t.y, t.width, t.height, style, false);
-      }
+  if (!ED.preview) {
+    if (ED.grid) {
+      ctx.strokeStyle = paper ? 'rgba(22,22,22,.12)' : 'rgba(255,255,255,.08)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let c = 1; c < LK.COLS; c++) { ctx.moveTo(c * LK.TILE, 0); ctx.lineTo(c * LK.TILE, LK.H); }
+      for (let r = 1; r < LK.ROWS; r++) { ctx.moveTo(0, r * LK.TILE); ctx.lineTo(LK.W, r * LK.TILE); }
+      ctx.stroke();
+    }
+    edDrawHintNotes();
+    edDrawTraps(t);
+    edDrawDrag(t);
+    if (ED.hover && !ED.drag && !ED.help) {
+      const g = ED_GROUPS.find(o => o.tools.includes(ED.tool));
+      ctx.strokeStyle = paper && g.n === 'EDIT' ? '#161616' : g.col;
+      ctx.lineWidth = 4;
+      ctx.strokeRect(ED.hover.c * LK.TILE + 2, ED.hover.r * LK.TILE + 2, LK.TILE - 4, LK.TILE - 4);
     }
   }
-
-  // Crumbling platforms
-  for (let r = 0; r < grid.length; r++) {
-    for (let c = 0; c < grid[r].length; c++) {
-      if (grid[r][c] === 'E') {
-        const t = tileAt(r, c);
-        drawStyledCrumblingPlatform({ x: t.x, y: t.y, width: t.width, height: t.height, state: 'solid', timer: 0, alpha: 1 }, style);
-      }
-    }
-  }
-
-  // Fake blocks (identical to solid on purpose - the overlay pass marks them)
-  for (let r = 0; r < grid.length; r++) {
-    for (let c = 0; c < grid[r].length; c++) {
-      if (grid[r][c] === 'F') {
-        const t = tileAt(r, c);
-        drawStyledPlatform(t.x, t.y, t.width, t.height, style, true);
-      }
-    }
-  }
-
-  // Gravity zones, grouped exactly like the game groups them
-  computeGravityZoneBoxes(grid).forEach((box, index) => {
-    drawStyledGravityZone({
-      id: index,
-      x: box.minCol * TILE_SIZE,
-      y: box.minRow * TILE_SIZE,
-      width: (box.maxCol - box.minCol + 1) * TILE_SIZE,
-      height: (box.maxRow - box.minRow + 1) * TILE_SIZE,
-      visual: {
-        color: '#44ddff', secondaryColor: '#ff44dd', alpha: 0.35,
-        stripeAngle: 45, stripeWidth: 8, stripeSpacing: 20,
-        animated: true, animSpeed: 40, showArrow: true, glowWhenActive: true
-      }
-    }, false, style);
-  });
-
-  // Door
-  const doorCell = findEditorChar('D');
-  if (doorCell) {
-    const t = tileAt(doorCell.row, doorCell.col);
-    drawStyledDoor({ x: t.x, y: t.y, width: t.width, height: t.height }, style);
-  }
-
-  // Spikes
-  for (let r = 0; r < grid.length; r++) {
-    for (let c = 0; c < grid[r].length; c++) {
-      if (!isSpikeChar(grid[r][c])) continue;
-      const t = tileAt(r, c);
-      drawStyledSpike({
-        x: t.x, y: t.y + 20, originalX: t.x,
-        width: TILE_SIZE, height: TILE_SIZE - 20,
-        moving: false, moved: false
-      }, style);
-    }
-  }
-
-  // The player, sitting on the spawn point
-  const spawnCell = findEditorChar('S');
-  if (spawnCell) {
-    drawStyledPlayer(spawnCell.col * TILE_SIZE + 15, spawnCell.row * TILE_SIZE, 45, 45, style);
-  }
-
   ctx.restore();
-
-  // Reset anything the game renderers may have left behind
   ctx.shadowBlur = 0;
   ctx.globalAlpha = 1;
   ctx.setLineDash([]);
-  ctx.lineWidth = 1;
-
-  // --- editor overlay pass (screen space, so lines stay crisp) ---
-  if (!editorPreviewMode) {
-    if (editorShowGrid) drawEditorGridLines();
-    drawEditorTileMarkers();
-    drawEditorSpikeOverlays();
-    drawEditorCursorPreview();
-  }
-
-  ctx.restore();
 
   // Frame around the play area
   ctx.strokeStyle = '#4a4a58';
   ctx.lineWidth = 2;
   ctx.strokeRect(ED_GRID_X - 1, ED_GRID_Y - 1, ED_GRID_W + 2, ED_GRID_H + 2);
 
-  if (editorPreviewMode) {
+  if (ED.preview) {
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillRect(ED_GRID_X + ED_GRID_W / 2 - 150, ED_GRID_Y + 8, 300, 30);
-    ctx.fillStyle = '#ffdd66';
-    ctx.font = 'bold 16px Arial, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('PREVIEW - what the player sees (TAB)', ED_GRID_X + ED_GRID_W / 2, ED_GRID_Y + 28);
-    ctx.textAlign = 'left';
+    ctx.fillRect(ED_GRID_X + ED_GRID_W / 2 - 160, ED_GRID_Y + 8, 320, 30);
+    edText('PREVIEW - what the player sees (TAB)', ED_GRID_X + ED_GRID_W / 2, ED_GRID_Y + 23, 16, { align: 'center', color: '#ffdd66' });
   }
 }
 
-function drawEditorGridLines() {
-  ctx.strokeStyle = 'rgba(255,255,255,0.09)';
-  ctx.lineWidth = 1;
+// Under each hint that waits for deaths (drawn faint), when it shows.
+function edDrawHintNotes() {
+  for (const x of ED.text) {
+    if (x.min == null && x.max == null) continue;
+    edText('shows ' + edShowName(x), x.x, x.y + (x.size || 60) * 0.5 + 18, 26, { align: 'center', color: ED.style === 'paper' ? '#161616' : '#ffcc33' });
+  }
+}
+
+function edTrapBadge(x, y, col, n) {
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = col;
   ctx.beginPath();
-  for (let c = 0; c <= EDITOR_COLS; c++) {
-    const x = ED_GRID_X + c * ED_TILE + 0.5;
-    ctx.moveTo(x, ED_GRID_Y);
-    ctx.lineTo(x, ED_GRID_Y + ED_GRID_H);
-  }
-  for (let r = 0; r <= EDITOR_ROWS; r++) {
-    const y = ED_GRID_Y + r * ED_TILE + 0.5;
-    ctx.moveTo(ED_GRID_X, y);
-    ctx.lineTo(ED_GRID_X + ED_GRID_W, y);
-  }
-  ctx.stroke();
-}
-
-// Labels so the builder can tell apart tiles the player is not supposed to.
-function drawEditorTileMarkers() {
-  const grid = editorDoc.grid;
-
-  for (let r = 0; r < grid.length; r++) {
-    for (let c = 0; c < grid[r].length; c++) {
-      const char = grid[r][c];
-      const x = ED_GRID_X + c * ED_TILE;
-      const y = ED_GRID_Y + r * ED_TILE;
-
-      if (char === 'F') {
-        ctx.strokeStyle = '#ff66cc';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([5, 4]);
-        ctx.strokeRect(x + 2, y + 2, ED_TILE - 4, ED_TILE - 4);
-        ctx.setLineDash([]);
-        ctx.fillStyle = '#ff66cc';
-        ctx.font = 'bold 13px Arial, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('FAKE', x + ED_TILE / 2, y + ED_TILE / 2 + 5);
-      } else if (char === 'I') {
-        ctx.fillStyle = 'rgba(68, 221, 221, 0.18)';
-        ctx.fillRect(x, y, ED_TILE, ED_TILE);
-        ctx.strokeStyle = '#44dddd';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([5, 4]);
-        ctx.strokeRect(x + 2, y + 2, ED_TILE - 4, ED_TILE - 4);
-        ctx.setLineDash([]);
-        ctx.fillStyle = '#88f2f2';
-        ctx.font = 'bold 13px Arial, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('HID', x + ED_TILE / 2, y + ED_TILE / 2 + 5);
-      } else if (char === 'E') {
-        ctx.strokeStyle = '#ddaa55';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([4, 4]);
-        ctx.strokeRect(x + 2, y + 2, ED_TILE - 4, ED_TILE - 4);
-        ctx.setLineDash([]);
-        ctx.fillStyle = '#ffcc77';
-        ctx.font = 'bold 11px Arial, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('CRUMB', x + ED_TILE / 2, y + ED_TILE / 2 + 4);
-      } else if (char === 'G' || char === 'g') {
-        ctx.fillStyle = 'rgba(140, 102, 255, 0.12)';
-        ctx.fillRect(x, y, ED_TILE, ED_TILE);
-      } else if (char === 'S') {
-        ctx.fillStyle = '#44aaff';
-        ctx.font = 'bold 11px Arial, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('SPAWN', x + ED_TILE / 2, y + ED_TILE - 4);
-      } else if (char === 'D') {
-        ctx.fillStyle = '#44ff88';
-        ctx.font = 'bold 11px Arial, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('EXIT', x + ED_TILE / 2, y + ED_TILE - 4);
-      }
-    }
-  }
-  ctx.textAlign = 'left';
-}
-
-// --- spike trap overlays: the heart of the editor ---
-function drawEditorSpikeOverlays() {
-  const grid = editorDoc.grid;
-
-  // Every spike shows a faint trigger line so the whole trap layout is readable
-  for (let r = 0; r < grid.length; r++) {
-    for (let c = 0; c < grid[r].length; c++) {
-      if (!isSpikeChar(grid[r][c])) continue;
-      const isSelected = editorSelectedSpike && editorSelectedSpike.row === r && editorSelectedSpike.col === c;
-      if (!isSelected) drawOneSpikeOverlay(r, c, false);
-    }
-  }
-
-  // The selected spike is drawn last so its handles sit on top
-  if (editorSelectedSpike) {
-    const { row, col } = editorSelectedSpike;
-    if (isSpikeChar(grid[row][col])) drawOneSpikeOverlay(row, col, true);
-    else editorSelectedSpike = null;
-  }
-}
-
-function drawOneSpikeOverlay(row, col, selected) {
-  const g = getSpikeGeometry(row, col);
-
-  const left = edWorldToScreenX(g.triggerX);
-  const right = edWorldToScreenX(g.triggerX + g.triggerW);
-  const topY = Math.max(ED_GRID_Y, edWorldToScreenY(g.triggerY));
-  const botY = Math.min(ED_GRID_Y + ED_GRID_H, edWorldToScreenY(g.triggerY + g.triggerH));
-  const spikeX = edWorldToScreenX(g.x);
-  const spikeTopY = edWorldToScreenY(g.spikeTop);
-  const tileW = TILE_SIZE * ED_SCALE;
-  const spikeH = (TILE_SIZE - 20) * ED_SCALE;
-
-  // A 0-tile spike never moves and has no trigger at all
-  const hasTrigger = g.digit > 0;
-
-  if (hasTrigger) {
-    ctx.strokeStyle = selected ? '#ffdd33' : 'rgba(255, 221, 51, 0.28)';
-    ctx.lineWidth = selected ? 3 : 2;
-    ctx.setLineDash(selected ? [] : [6, 5]);
-
-    if (g.isLine) {
-      ctx.beginPath();
-      ctx.moveTo(left, topY);
-      ctx.lineTo(left, botY);
-      ctx.stroke();
-    } else {
-      if (selected) {
-        ctx.fillStyle = 'rgba(255, 221, 51, 0.10)';
-        ctx.fillRect(left, topY, right - left, botY - topY);
-      }
-      ctx.strokeRect(left, topY, right - left, botY - topY);
-    }
-    ctx.setLineDash([]);
-
-    if (selected && g.isLine) {
-      // Soft band showing the slice of space that arms the trap
-      ctx.fillStyle = 'rgba(255, 221, 51, 0.10)';
-      ctx.fillRect(left - 5, topY, 10, botY - topY);
-    }
-  }
-
-  if (!selected) return;
-
-  // --- ghost: where the spike shoots to ---
-  if (g.digit > 0) {
-    const ghostX = edWorldToScreenX(g.ghostX);
-    const ghostY = edWorldToScreenY(g.ghostY);
-
-    ctx.save();
-    ctx.globalAlpha = 0.45;
-    ctx.fillStyle = '#ff4455';
-    ctx.fillRect(ghostX, ghostY, tileW, spikeH);
-    ctx.restore();
-
-    ctx.strokeStyle = '#ff8899';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 4]);
-    ctx.strokeRect(ghostX, ghostY, tileW, spikeH);
-    ctx.setLineDash([]);
-
-    // Arrow from the spike to the ghost, whichever way it travels
-    const fromX = spikeX + tileW / 2;
-    const fromY = spikeTopY + spikeH / 2;
-    const toX = ghostX + tileW / 2;
-    const toY = ghostY + spikeH / 2;
-    const dx = toX - fromX;
-    const dy = toY - fromY;
-    const len = Math.sqrt(dx * dx + dy * dy) || 1;
-    const ux = dx / len;
-    const uy = dy / len;
-
-    ctx.strokeStyle = '#ff8899';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(fromX, fromY);
-    ctx.lineTo(toX - ux * 10, toY - uy * 10);
-    ctx.stroke();
-
-    ctx.fillStyle = '#ff8899';
-    ctx.beginPath();
-    ctx.moveTo(toX, toY);
-    ctx.lineTo(toX - ux * 12 - uy * 6, toY - uy * 12 + ux * 6);
-    ctx.lineTo(toX - ux * 12 + uy * 6, toY - uy * 12 - ux * 6);
-    ctx.closePath();
-    ctx.fill();
-
-    // Drag grip on the ghost
-    ctx.fillStyle = '#ffffff';
-    for (let i = -1; i <= 1; i++) {
-      ctx.fillRect(toX - 1 + i * 5, toY - 6, 2, 12);
-    }
-  }
-
-  // --- the two corner handles: where the trigger starts and where it ends ---
-  if (hasTrigger) {
-    const startY = Math.max(ED_GRID_Y + 6, Math.min(ED_GRID_Y + ED_GRID_H - 6, edWorldToScreenY(g.triggerY)));
-    const endY = Math.max(ED_GRID_Y + 6, Math.min(ED_GRID_Y + ED_GRID_H - 6, edWorldToScreenY(g.triggerY + g.triggerH)));
-
-    edDrawTriggerHandle(left, startY, g.isFull ? '#66ddff' : '#ffdd33', -1);
-    edDrawTriggerHandle(right, endY, g.isFull ? '#66ddff' : '#ffdd33', 1);
-
-    // Label above the trigger
-    const label = describeTrigger(g).toUpperCase();
-    const labelX = (left + right) / 2;
-    const labelY = Math.max(ED_GRID_Y + 14, Math.min(startY - 16, ED_GRID_Y + ED_GRID_H - 8));
-    ctx.font = 'bold 12px Arial, sans-serif';
-    ctx.textAlign = 'center';
-    const w = ctx.measureText(label).width + 12;
-    ctx.fillStyle = 'rgba(20,20,28,0.85)';
-    ctx.fillRect(labelX - w / 2, labelY - 12, w, 16);
-    ctx.fillStyle = g.isFull ? '#66ddff' : '#ffdd33';
-    ctx.fillText(label, labelX, labelY);
-    ctx.textAlign = 'left';
-  }
-
-  // Selection ring around the spike itself
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 2;
-  ctx.setLineDash([4, 3]);
-  ctx.strokeRect(spikeX + 1, edWorldToScreenY(g.y) + 1, tileW - 2, TILE_SIZE * ED_SCALE - 2);
-  ctx.setLineDash([]);
-
-  // Range + direction badge on the spike
-  const badge = String(g.digit) + g.vector.arrow;
-  ctx.font = 'bold 12px Arial, sans-serif';
-  const badgeW = ctx.measureText(badge).width + 8;
-  ctx.fillStyle = 'rgba(20,20,28,0.85)';
-  ctx.fillRect(spikeX + 2, edWorldToScreenY(g.y) + 2, badgeW, 16);
-  ctx.fillStyle = '#ffffff';
-  ctx.textAlign = 'center';
-  ctx.fillText(badge, spikeX + 2 + badgeW / 2, edWorldToScreenY(g.y) + 14);
-  ctx.textAlign = 'left';
-}
-
-// One round grab handle with a chevron pointing the way it resizes
-function edDrawTriggerHandle(x, y, color, side) {
-  ctx.fillStyle = color;
-  ctx.strokeStyle = '#1a1a22';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(x, y, 9, 0, Math.PI * 2);
+  ctx.arc(x + 16, y + 16, 16, 0, Math.PI * 2);
   ctx.fill();
-  ctx.stroke();
-
-  ctx.strokeStyle = '#1a1a22';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(x - 4, y - 1);
-  ctx.lineTo(x, y - 5);
-  ctx.lineTo(x + 4, y - 1);
-  ctx.moveTo(x - 4, y + 1);
-  ctx.lineTo(x, y + 5);
-  ctx.lineTo(x + 4, y + 1);
-  ctx.stroke();
-
-  // A tick on the outer side, so start and end handles are told apart
-  ctx.beginPath();
-  ctx.moveTo(x + side * 9, y);
-  ctx.lineTo(x + side * 14, y);
-  ctx.stroke();
+  edText(String(n), x + 16, y + 17, 22, { align: 'center', color: '#0a0c20' });
+  ctx.restore();
 }
 
-// Hover highlight + shift-rectangle preview
-function drawEditorCursorPreview() {
-  if (editorDrag && editorDrag.type === 'rect') {
-    const a = editorDrag.anchor;
-    const b = editorHoverCell || a;
-    const r0 = Math.min(a.row, b.row), r1 = Math.max(a.row, b.row);
-    const c0 = Math.min(a.col, b.col), c1 = Math.max(a.col, b.col);
-    ctx.fillStyle = 'rgba(255,255,255,0.15)';
-    ctx.fillRect(ED_GRID_X + c0 * ED_TILE, ED_GRID_Y + r0 * ED_TILE, (c1 - c0 + 1) * ED_TILE, (r1 - r0 + 1) * ED_TILE);
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(ED_GRID_X + c0 * ED_TILE, ED_GRID_Y + r0 * ED_TILE, (c1 - c0 + 1) * ED_TILE, (r1 - r0 + 1) * ED_TILE);
-    return;
-  }
+// A trap spike, which the game hides until its trap fires: a ghost in its trap's color, with the trap's number. A spike
+// with a reach (travel) gets a line as long as its flight, with a bar where it stops.
+function edDrawTrapGhost(s, col, a, t, n) {
+  const T = LK.TILE, d = LK.dirIndex(s.dir), dx = LK.DIRS[d][0], dy = LK.DIRS[d][1], m = Math.max(Math.abs(dx), Math.abs(dy));
+  const cx = s.c * T + 30, cy = s.r * T + 30, len = s.travel ? 30 / m + s.travel * T : 150, ex = cx + dx * len, ey = cy + dy * len;
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.strokeStyle = col;
+  ctx.setLineDash([8, 7]);
+  ctx.lineDashOffset = -t * 40;
+  ctx.lineWidth = 4;
+  ctx.strokeRect(s.c * T + 3, s.r * T + 3, 54, 54);
+  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey); ctx.stroke();
+  ctx.setLineDash([]);
+  if (s.travel) { ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(ex - dy * 16, ey + dx * 16); ctx.lineTo(ex + dy * 16, ey - dx * 16); ctx.stroke(); }
+  const sp = LK.Spike(cx + dx * 26 / m, cy + dy * 26 / m, dx, dy, { len: 44, wid: 36 });
+  ctx.fillStyle = '#ff4d6d';
+  ctx.beginPath(); lkTriPath(sp, 0); ctx.fill();
+  const tag = (s.speed <= 150 ? 'C' : s.speed <= 900 ? 'F' : 'S') + (s.delay ? ' +' + s.delay : '');
+  edText(tag, s.c * T + 30, s.r * T + 50, 22, { align: 'center', color: '#fff' });
+  if (n != null) edTrapBadge(s.c * T + 2, s.r * T + 2, col, n);
+  ctx.restore();
+}
 
-  if (!editorHoverCell || editorDrag) return;
-  const tool = EDITOR_TOOLS.find(t => t.id === editorTool);
-  ctx.strokeStyle = tool ? tool.color : '#ffffff';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(ED_GRID_X + editorHoverCell.col * ED_TILE + 1, ED_GRID_Y + editorHoverCell.row * ED_TILE + 1, ED_TILE - 2, ED_TILE - 2);
+// Sliding spikes (the game draws the strip itself, in plain sight): an arrow in its trap's color to where they dash, an
+// outline there, and the dash's time.
+function edDrawSlideGhost(s, col, a, t, n) {
+  const T = LK.TILE, [x0, y0] = edSlideMid(s), x1 = x0 + s.move[0] * T, y1 = y0 + s.move[1] * T, ang = Math.atan2(y1 - y0, x1 - x0);
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.strokeStyle = col;
+  ctx.setLineDash([8, 7]);
+  ctx.lineDashOffset = -t * 40;
+  ctx.lineWidth = 4;
+  ctx.strokeRect((s.c + s.move[0]) * T + 3, (s.r + s.move[1]) * T + 3, 54, 54);
+  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = col;
+  ctx.beginPath(); ctx.moveTo(x1, y1);
+  for (const k of [-1, 1]) ctx.lineTo(x1 - Math.cos(ang + k * 0.45) * 26, y1 - Math.sin(ang + k * 0.45) * 26);
+  ctx.fill();
+  edText(s.time + ' s', s.c * T + 44, s.r * T + 14, 20, { align: 'center', color: '#fff' });
+  if (n != null) edTrapBadge(s.c * T + 2, s.r * T + 2, col, n);
+  ctx.restore();
+}
+
+// Every trap's parts, lines from each trigger to each spike (the picked trap's bold), triggers that are off; then the
+// pick (a trap's part, a flip zone or a hint).
+function edDrawTraps(t) {
+  const paper = ED.style === 'paper', pick = ED.sel && ED.sel.t != null ? ED.sel.t : -1;
+  ED.traps.forEach((tp, i) => {
+    const col = edTrapColor(i, paper), on = i === pick, a = pick < 0 || on ? 1 : 0.45;
+    ctx.save();
+    ctx.lineWidth = on ? 5 : 3;
+    ctx.globalAlpha = on ? 0.95 : 0.35;
+    ctx.setLineDash([10, 8]);
+    ctx.lineDashOffset = -t * 30;
+    for (const g of tp.triggers) {
+      ctx.strokeStyle = g.off ? '#8a93c0' : col;
+      ctx.beginPath();
+      const [x, y] = edTrigCenter(g);
+      for (const [sx, sy] of tp.spikes.map(edSpikeMid).concat(tp.slides.map(edSlideMid))) { ctx.moveTo(x, y); ctx.lineTo(sx, sy); }
+      ctx.stroke();
+    }
+    ctx.restore();
+    for (const g of tp.triggers) {
+      const r = edTrigRect(g);
+      if (g.off) {                                                       // kept, but it never fires
+        ctx.save();
+        ctx.globalAlpha = 0.6;
+        ctx.strokeStyle = '#8a93c0';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([5, 9]);
+        ctx.beginPath();
+        if (r.w) ctx.rect(r.x, r.y, r.w, r.h); else { ctx.moveTo(r.x, r.y); ctx.lineTo(r.x, r.y + r.h); }
+        ctx.stroke();
+        ctx.restore();
+        edText('off', r.x + (r.w ? r.w / 2 : 0), r.y + r.h / 2, 28, { align: 'center', color: '#8a93c0' });
+      }
+      edTrapBadge(r.x - (r.w ? 0 : 16), r.y + 2, g.off ? '#8a93c0' : col, i + 1);
+    }
+    for (const s of tp.spikes) edDrawTrapGhost(s, col, 0.9 * a, t, i + 1);
+    for (const s of tp.slides) edDrawSlideGhost(s, col, 0.9 * a, t, i + 1);
+  });
+  const part = edPartOf(ED.sel);
+  if (!part) return;
+  const ink = paper ? '#161616' : '#ffffff';                            // the pick: white, or ink on the sketch page
+  ctx.save();
+  ctx.strokeStyle = ink;
+  ctx.fillStyle = ink;
+  ctx.lineWidth = 4;
+  ctx.shadowColor = ink;
+  ctx.shadowBlur = paper ? 0 : 10;
+  if (ED.sel.part === 'spike' || ED.sel.part === 'slide') ctx.strokeRect(part.c * LK.TILE - 3, part.r * LK.TILE - 3, 66, 66);
+  else if (ED.sel.part === 'text') { const b = edTextBox(part); ctx.strokeRect(b.x, b.y, b.w, b.h); }
+  else if (ED.sel.part === 'flip') {
+    const x = part.c * LK.TILE, y = part.r * LK.TILE, w = part.w * LK.TILE, h = part.h * LK.TILE;
+    ctx.strokeRect(x - 3, y - 3, w + 6, h + 6);
+    ctx.fillRect(x + w - 12, y + h - 12, 24, 24);                       // drag to size it
+  } else {
+    const r = edTrigRect(part), hx = r.x + r.w, hy = r.y + r.h;
+    if (r.w) ctx.strokeRect(r.x - 3, r.y - 3, r.w + 6, r.h + 6); else ctx.strokeRect(r.x - 12, r.y - 3, 24, r.h + 6);
+    ctx.fillRect(hx - 12, hy - 12, 24, 24);                             // drag to size it
+  }
+  ctx.restore();
+}
+
+// What a drag will make: an aimed spike, a trigger, a dash, a rectangle.
+function edDrawDrag(t) {
+  const d = ED.drag, T = LK.TILE, paper = ED.style === 'paper';
+  if (!d) return;
+  const nextColor = () => edTrapColor(ED.join && edSelTrap() ? ED.sel.t : ED.traps.length, paper);
+  if (d.kind === 'aim') {
+    const col = d.spike ? edTrapColor(d.spike.t, paper) : nextColor();
+    const travel = d.spike ? edPartOf(d.spike).travel : ED_REACHES[ED.reach];
+    edDrawTrapGhost({ c: d.c, r: d.r, dir: d.dir, speed: LK.SPEEDS[ED.speed], delay: ED_DELAYS[ED.delay], travel }, col, 1, t);
+    for (let i = 0; i < 8; i++) {
+      ctx.fillStyle = i === d.dir ? '#ff3355' : 'rgba(255,255,255,.45)';
+      ctx.beginPath();
+      ctx.arc(d.c * T + 30 + LK.DIRS[i][0] * 120, d.r * T + 30 + LK.DIRS[i][1] * 120, i === d.dir ? 12 : 8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  if (d.kind === 'trig') {
+    const q = edRectOf(d), col = ED.sel ? edTrapColor(ED.sel.t, paper) : '#ffffff';
+    const x = ED.line ? (d.c0 + 0.5) * T : q.c * T, w = ED.line ? 0 : q.w * T;
+    ctx.save();
+    ctx.strokeStyle = col;
+    ctx.fillStyle = lkRgba(col, 0.12);
+    ctx.setLineDash([14, 10]);
+    ctx.lineWidth = 5;
+    if (w) { ctx.fillRect(x, q.r * T, w, q.h * T); ctx.strokeRect(x, q.r * T, w, q.h * T); }
+    else { ctx.beginPath(); ctx.moveTo(x, q.r * T); ctx.lineTo(x, (q.r + q.h) * T); ctx.stroke(); }
+    ctx.restore();
+  }
+  if (d.kind === 'dash') {
+    const col = d.slide ? edTrapColor(d.slide.t, paper) : nextColor();
+    edDrawSlideGhost({ c: d.c, r: d.r, move: [d.c1 - d.c, d.r1 - d.r], time: d.slide ? edPartOf(d.slide).time : ED_DASHES[ED.dash] }, col, 1, t);
+  }
+  if (d.kind === 'rect' || d.kind === 'flipRect') {
+    const q = edRectOf(d);
+    ctx.save();
+    ctx.strokeStyle = d.erase ? '#ff3355' : '#ffffff';
+    ctx.fillStyle = d.erase ? 'rgba(255,51,85,.15)' : 'rgba(255,255,255,.12)';
+    ctx.setLineDash([10, 8]);
+    ctx.lineWidth = 4;
+    ctx.fillRect(q.c * T, q.r * T, q.w * T, q.h * T);
+    ctx.strokeRect(q.c * T, q.r * T, q.w * T, q.h * T);
+    ctx.restore();
+    edText(q.w + ' × ' + q.h, (q.c + q.w / 2) * T, (q.r + q.h / 2) * T, 40, { align: 'center', color: '#fff' });
+  }
 }
 
 // --- top bar ---
@@ -1194,252 +1220,108 @@ function drawEditorTopBar() {
   ctx.lineTo(GAME_WIDTH, ED_TOPBAR_H - 0.5);
   ctx.stroke();
 
-  const byId = id => editorButtons.find(b => b.id === id);
-
-  edDrawButton(byId('back'), '◀ BACK', { font: 'bold 14px Arial, sans-serif' });
-
-  // Level name field (click to rename, typed straight on the canvas)
-  const nameBtn = byId('name');
-  const editing = editorNameEditing;
-  ctx.fillStyle = editing ? '#1b2a3d' : '#26262f';
-  ctx.fillRect(nameBtn.x, nameBtn.y, nameBtn.w, nameBtn.h);
-  ctx.strokeStyle = editing ? '#66aaff' : '#4a4a58';
-  ctx.lineWidth = editing ? 2 : 1;
-  ctx.strokeRect(nameBtn.x + 0.5, nameBtn.y + 0.5, nameBtn.w - 1, nameBtn.h - 1);
-
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 17px Arial, sans-serif';
-  ctx.textAlign = 'left';
-  const displayName = editorDoc.name || '';
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(nameBtn.x + 6, nameBtn.y, nameBtn.w - 12, nameBtn.h);
-  ctx.clip();
-  ctx.fillText(displayName, nameBtn.x + 10, nameBtn.y + 24);
-  if (editing && editorBlink < 0.5) {
-    const caretX = nameBtn.x + 12 + ctx.measureText(displayName).width;
-    ctx.fillRect(caretX, nameBtn.y + 8, 2, 20);
-  }
-  ctx.restore();
-
-  if (!editing) {
-    ctx.fillStyle = '#6f6f80';
-    ctx.font = '11px Arial, sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText('rename', nameBtn.x + nameBtn.w - 8, nameBtn.y + 26);
+  for (const b of ED.buttons) {
+    if (b.y >= ED_TOPBAR_H) continue;
+    if (b.kind !== 'name') { edDrawButton(b); continue; }
+    // Level name field (click to rename, typed straight on the canvas)
+    ctx.fillStyle = ED.naming ? '#1b2a3d' : '#26262f';
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+    ctx.strokeStyle = ED.naming ? '#66aaff' : '#4a4a58';
+    ctx.lineWidth = ED.naming ? 2 : 1;
+    ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(b.x + 6, b.y, b.w - 12, b.h);
+    ctx.clip();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 17px Arial, sans-serif';
     ctx.textAlign = 'left';
+    ctx.fillText(ED.name, b.x + 10, b.y + 24);
+    if (ED.naming && ED.blink < 0.5) ctx.fillRect(b.x + 12 + ctx.measureText(ED.name).width, b.y + 8, 2, 20);
+    ctx.restore();
+    if (!ED.naming) edText('rename', b.x + b.w - 8, b.y + 22, 11, { align: 'right', color: '#6f6f80', bold: false });
   }
-
-  // Visual style chips
-  CUSTOM_VISUAL_STYLES.forEach(style => {
-    const btn = byId('style:' + style.id);
-    edDrawButton(btn, style.label, {
-      active: editorDoc.visualStyle === style.id,
-      activeColor: '#5b3f8f',
-      borderColor: '#bb88ff',
-      font: 'bold 13px Arial, sans-serif'
-    });
-  });
-
-  edDrawButton(byId('preview'), editorPreviewMode ? 'EDIT VIEW' : 'PREVIEW', {
-    active: editorPreviewMode, activeColor: '#7a6a1f', borderColor: '#ffdd66',
-    font: 'bold 13px Arial, sans-serif'
-  });
-  edDrawButton(byId('help'), '?', { font: 'bold 20px Arial, sans-serif', active: editorShowHelp });
-
-  const problems = validateEditorDoc();
-  const blocked = problems.some(p => p.level === 'error');
-  edDrawButton(byId('test'), '▶ TEST PLAY', {
-    active: !blocked, activeColor: '#2f7a3f', borderColor: '#66ff99',
-    disabled: blocked, font: 'bold 16px Arial, sans-serif'
-  });
-  edDrawButton(byId('save'), editorDirty ? 'SAVE •' : 'SAVED', {
-    active: editorDirty, activeColor: '#2f5f9a', borderColor: '#88ccff',
-    font: 'bold 16px Arial, sans-serif'
-  });
 }
 
-// --- left tool palette ---
+// --- left column: the palette, and the panel under it ---
 function drawEditorPalette() {
   ctx.fillStyle = '#1b1b23';
   ctx.fillRect(0, ED_TOPBAR_H, ED_PALETTE_W, GAME_HEIGHT - ED_TOPBAR_H);
   ctx.strokeStyle = '#33333f';
+  ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(ED_PALETTE_W - 0.5, ED_TOPBAR_H);
   ctx.lineTo(ED_PALETTE_W - 0.5, GAME_HEIGHT);
   ctx.stroke();
 
-  ctx.fillStyle = '#7f7f92';
-  ctx.font = 'bold 13px Arial, sans-serif';
-  ctx.textAlign = 'left';
-  ctx.fillText('TOOLS', 12, 78);
-
-  EDITOR_TOOLS.forEach(tool => {
-    const btn = editorButtons.find(b => b.id === 'tool:' + tool.id);
-    const active = editorTool === tool.id;
-    edDrawButton(btn, null, { active, activeColor: '#33334a', borderColor: tool.color });
-
-    edDrawTileIcon(btn.x + 6, btn.y + 5, 26, tool);
-
-    ctx.fillStyle = active ? '#ffffff' : '#c3c3d0';
-    ctx.font = 'bold 14px Arial, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText(tool.label, btn.x + 40, btn.y + 23);
-
-    ctx.fillStyle = active ? '#9aa4b8' : '#5f5f70';
-    ctx.font = 'bold 12px monospace';
-    ctx.textAlign = 'right';
-    ctx.fillText(tool.key, btn.x + btn.w - 8, btn.y + 23);
-    ctx.textAlign = 'left';
-  });
-
-  // Spike controls: range, direction and speed
-  if (editorSpikeControlsVisible()) {
-    const active = editorActiveSpikeSettings();
-
-    ctx.fillStyle = '#7f7f92';
-    ctx.font = 'bold 13px Arial, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText(active.selected ? 'SPIKE RANGE (tiles)' : 'NEW SPIKE RANGE', 12, ED_SPIKE_Y + 10);
-
-    for (let d = 0; d <= 9; d++) {
-      const btn = editorButtons.find(b => b.id === 'spikeDist:' + d);
-      if (!btn) continue;
-      edDrawButton(btn, String(d), {
-        active: active.distance === d,
-        activeColor: '#8a2733',
-        borderColor: '#ff6677',
-        font: 'bold 14px Arial, sans-serif'
-      });
-    }
-
-    ctx.fillStyle = '#7f7f92';
-    ctx.font = 'bold 13px Arial, sans-serif';
-    ctx.fillText('DIRECTION', 12, ED_SPIKE_DIR_Y - 8);
-    ctx.fillText('SPEED', 102, ED_SPIKE_DIR_Y - 8);
-
-    // Direction pad - the centre cell shows the range instead of a 9th arrow
-    ED_DIRECTION_PAD.forEach((padRow, r) => {
-      padRow.forEach((dir, c) => {
-        if (!dir) {
-          const cx = 12 + c * 27;
-          const cy = ED_SPIKE_DIR_Y + r * 27;
-          ctx.fillStyle = '#23232c';
-          ctx.fillRect(cx, cy, 25, 25);
-          ctx.fillStyle = '#6f6f80';
-          ctx.font = 'bold 13px Arial, sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText(String(active.distance), cx + 12, cy + 17);
-          ctx.textAlign = 'left';
-          return;
-        }
-        const btn = editorButtons.find(b => b.id === 'spikeDir:' + dir);
-        if (!btn) return;
-        edDrawButton(btn, SPIKE_DIRECTIONS[dir].arrow, {
-          active: active.dir === dir,
-          activeColor: '#8a2733',
-          borderColor: '#ff6677',
-          font: 'bold 15px Arial, sans-serif'
-        });
-      });
-    });
-
-    // Speed stepper
-    const downBtn = editorButtons.find(b => b.id === 'spikeSpeed:down');
-    const upBtn = editorButtons.find(b => b.id === 'spikeSpeed:up');
-    edDrawButton(downBtn, '\u2212', { font: 'bold 16px Arial, sans-serif', disabled: active.speed <= ED_SPEED_LADDER[0] });
-    edDrawButton(upBtn, '+', { font: 'bold 16px Arial, sans-serif', disabled: active.speed >= ED_SPEED_LADDER[ED_SPEED_LADDER.length - 1] });
-
-    ctx.fillStyle = '#23232c';
-    ctx.fillRect(128, ED_SPIKE_DIR_Y, 30, 25);
-    ctx.strokeStyle = '#4a4a58';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(128.5, ED_SPIKE_DIR_Y + 0.5, 29, 24);
-    ctx.fillStyle = '#ffdd33';
-    ctx.font = 'bold 13px Arial, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(String(active.speed), 143, ED_SPIKE_DIR_Y + 17);
-    ctx.textAlign = 'left';
-
-    // How long that dash actually lasts, in plain seconds
-    ctx.fillStyle = '#8a8a9c';
-    ctx.font = '11px Arial, sans-serif';
-    ctx.fillText((1 / active.speed).toFixed(2) + 's dash', 102, ED_SPIKE_DIR_Y + 40);
-    ctx.fillText(active.speed > DEFAULT_SPIKE_SPEED ? 'faster' : (active.speed < DEFAULT_SPIKE_SPEED ? 'slower' : 'classic'),
-      102, ED_SPIKE_DIR_Y + 54);
-
-    ctx.fillStyle = '#6f6f80';
-    ctx.font = '11px Arial, sans-serif';
-    ctx.fillText('0 = never moves', 12, ED_SPIKE_DIR_Y + 94);
+  const P = edPaletteLayout();
+  for (const h of P.heads) edText(h.n, 10, h.y, 11, { color: lkRgba(h.col, 0.8) });
+  for (const b of ED.buttons) {
+    if (!b.icon) continue;
+    edDrawButton(b);
+    edDrawToolIcon(b.icon, b.x + 7, b.y + 4, 32);
+    edText(ED_TOOLS[b.icon].key, b.x + b.w - 3, b.y + b.h - 7, 9, { align: 'right', color: b.active ? '#c8cce0' : '#6f6f80' });
   }
 
-  // Contextual tip for the active tool
+  // the panel's title: the picked trap (and what it has), flip zone or hint, or else the tool in use
+  const y = ED_PANEL_Y + 10, tp = edSelTrap(), many = (n, s) => n + ' ' + s + (n === 1 ? '' : 's');
+  if (tp) {
+    edText('TRAP ' + (ED.sel.t + 1), 10, y, 15, { color: edTrapColor(ED.sel.t) });
+    const has = [tp.spikes.length || !tp.slides.length ? many(tp.spikes.length, 'spike') : '', tp.slides.length ? many(tp.slides.length, 'slide') : '',
+      many(tp.triggers.length, 'trigger')];
+    edText(has.filter(Boolean).join(' · '), 218, y, 11, { align: 'right', color: '#8a8a9c', bold: false, max: 140 });
+  } else if (edPicked('flip') || edPicked('text')) {
+    edText(edPicked('flip') ? 'FLIP ZONE' : 'HINT TEXT', 10, y, 15, { color: '#ffffff' });
+  } else {
+    const g = ED_GROUPS.find(o => o.tools.includes(ED.tool));
+    edText(ED_TOOLS[ED.tool].n.toUpperCase(), 10, y, 15, { color: g.col });
+  }
+  for (const b of ED.buttons) if (!b.icon && b.y >= ED_PANEL_Y && b.x < ED_PALETTE_W) edDrawButton(b);
+
+  // Contextual tip for the active tool, under the panel
   ctx.fillStyle = '#8a8a9c';
   ctx.font = '12px Arial, sans-serif';
-  // With the spike controls open there is only room for a two-line tip - the
-  // bar along the bottom carries the full explanation anyway.
-  const tight = editorSpikeControlsVisible();
-  edWrapText(EDITOR_TOOL_HINTS[editorTool] || '', 12, tight ? ED_SPIKE_DIR_Y + 112 : ED_SPIKE_Y,
-    ED_PALETTE_W - 24, 15, tight ? 2 : 6);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  edWrapText(ED_TOOLS[ED.tool].hint, 10, ED.panelEnd + 14, ED_PALETTE_W - 20, 15, Math.max(1, Math.floor((GAME_HEIGHT - 8 - ED.panelEnd - 14) / 15) + 1));
 }
 
 // --- bottom status bar ---
 function drawEditorBottomBar() {
   ctx.fillStyle = '#20202a';
   ctx.fillRect(ED_PALETTE_W, ED_BOTTOM_Y, GAME_WIDTH - ED_PALETTE_W, GAME_HEIGHT - ED_BOTTOM_Y);
+  for (const b of ED.buttons) if (b.y >= ED_BOTTOM_Y && b.x >= ED_PALETTE_W) edDrawButton(b);
 
-  const byId = id => editorButtons.find(b => b.id === id);
-  edDrawButton(byId('grid'), 'GRID', { active: editorShowGrid, font: 'bold 12px Arial, sans-serif' });
-  edDrawButton(byId('undo'), 'UNDO', { disabled: editorUndoStack.length === 0, font: 'bold 12px Arial, sans-serif' });
-  edDrawButton(byId('redo'), 'REDO', { disabled: editorRedoStack.length === 0, font: 'bold 12px Arial, sans-serif' });
-  edDrawButton(byId('clear'), 'CLEAR', { font: 'bold 12px Arial, sans-serif', textColor: '#ff9999' });
-  edDrawButton(byId('fullscreen'), isFullscreenActive() ? 'WINDOW' : 'FULL',
-               { active: isFullscreenActive(), activeColor: '#2f6f68', borderColor: '#44ddcc',
-                 font: 'bold 12px Arial, sans-serif' });
-
-  ctx.textAlign = 'left';
-
-  // Toast messages win over everything else
-  if (editorStatusTimer > 0 && editorStatusText) {
-    ctx.fillStyle = editorStatusColor;
-    ctx.font = 'bold 15px Arial, sans-serif';
-    ctx.fillText(editorStatusText, ED_PALETTE_W + 14, ED_BOTTOM_Y + 28);
-    return;
-  }
-
-  // A selected spike shows its exact numbers here
-  if (editorSelectedSpike && isSpikeChar(editorDoc.grid[editorSelectedSpike.row][editorSelectedSpike.col])) {
-    const g = getSpikeGeometry(editorSelectedSpike.row, editorSelectedSpike.col);
-    ctx.fillStyle = '#ffdd33';
-    ctx.font = 'bold 14px Arial, sans-serif';
-    ctx.fillText('SPIKE  •  ' + g.digit + ' tiles ' + g.vector.arrow + ' ' + g.meta.dir +
-      '  •  speed ' + g.meta.speed + ' (' + (1 / g.meta.speed).toFixed(2) + 's dash)' +
-      '  •  trigger ' + describeTrigger(g) + ' at ' + Math.round(g.triggerX) + ',' + Math.round(g.triggerY),
-      ED_PALETTE_W + 14, ED_BOTTOM_Y + 20);
-    ctx.fillStyle = '#8a8a9c';
-    ctx.font = '12px Arial, sans-serif';
-    ctx.fillText('Drag the ghost = range + direction  |  drag the trigger = move it anywhere  |  drag a round handle = where it starts / ends  |  drag the spike = move the whole trap  |  R rotate  |  H full height  |  DEL remove',
-      ED_PALETTE_W + 14, ED_BOTTOM_Y + 37);
-    return;
-  }
-
-  // Otherwise: validation problems, then the general hint
-  const problems = validateEditorDoc();
-  if (problems.length > 0) {
-    const error = problems.find(p => p.level === 'error') || problems[0];
-    ctx.fillStyle = error.level === 'error' ? '#ff6666' : '#ffbb55';
-    ctx.font = 'bold 14px Arial, sans-serif';
-    ctx.fillText((error.level === 'error' ? '⚠ ' : '⚠ ') + error.text, ED_PALETTE_W + 14, ED_BOTTOM_Y + 20);
+  const x = ED_PALETTE_W + 14, tp = edSelTrap();
+  // Line 1: a toast, else the picked trap in numbers, else what is wrong with the level
+  if (ED.statusT > 0 && ED.status) {
+    edText(ED.status, x, ED_BOTTOM_Y + 20, 15, { color: ED.statusColor, max: 950 });
+  } else if (tp) {
+    const sp = tp.spikes, parts = ['TRAP ' + (ED.sel.t + 1)];
+    if (sp.length) parts.push(sp.length + ' spike' + (sp.length === 1 ? '' : 's') + ' · ' + (edSame(sp, s => s.speed) != null ? edSpeedName(sp[0].speed) : 'mixed speeds')
+      + ' · reach ' + (edSame(sp, s => s.travel || 0) != null ? edReachName(sp[0].travel || 0) : 'mixed'));
+    if (tp.slides.length) parts.push(tp.slides.length + ' sliding · dash ' + (edSame(tp.slides, s => s.time) != null ? tp.slides[0].time + ' s' : 'mixed'));
+    parts.push(!tp.triggers.length ? 'no trigger yet' : tp.triggers.length + ' trigger' + (tp.triggers.length === 1 ? '' : 's')
+      + (tp.triggers.every(g => g.off) ? ' (off)' : tp.triggers[0].show ? ' (visible)' : ' (hidden)'));
+    edText(parts.join('  •  '), x, ED_BOTTOM_Y + 20, 14, { color: edTrapColor(ED.sel.t), max: 950 });
   } else {
-    ctx.fillStyle = '#66cc88';
-    ctx.font = 'bold 14px Arial, sans-serif';
-    ctx.fillText('✓ Level is playable - press TEST PLAY', ED_PALETTE_W + 14, ED_BOTTOM_Y + 20);
+    const bad = ED.problems.find(p => !(ED.step && ED.sel && new RegExp('^Trap ' + (ED.sel.t + 1) + ' ').test(p.text)));
+    if (bad) edText('⚠ ' + bad.text, x, ED_BOTTOM_Y + 20, 14, { color: bad.bad ? '#ff6666' : '#ffbb55', max: 950 });
+    else edText('✓ Level is playable - press TEST PLAY', x, ED_BOTTOM_Y + 20, 14, { color: '#66cc88' });
   }
 
-  ctx.fillStyle = '#8a8a9c';
-  ctx.font = '12px Arial, sans-serif';
-  ctx.fillText('Left click paints  |  right click erases  |  SHIFT+drag = rectangle  |  CTRL+Z undo  |  ENTER test  |  ? help',
-    ED_PALETTE_W + 14, ED_BOTTOM_Y + 37);
+  // Lines 2-3: what the tool under the mouse does, or what happens next
+  const m = ED.mouse, over = ED.buttons.find(b => b.icon && m.x >= b.x && m.x <= b.x + b.w && m.y >= b.y && m.y <= b.y + b.h);
+  const hint = over ? ED_TOOLS[over.icon].n + ' (' + ED_TOOLS[over.icon].key + '): ' + ED_TOOLS[over.icon].hint
+    : ED.step && tp ? 'Trap ' + (ED.sel.t + 1) + ': drag the trigger that fires it. Right-click or ESC: no trigger for now.'
+    : ED.join && tp ? 'Place trap spikes or sliding spikes to add them to trap ' + (ED.sel.t + 1) + ': they fire together. ESC when done.'
+    : ED_TOOLS[ED.tool].n + ': ' + ED_TOOLS[ED.tool].hint;
+  ctx.fillStyle = '#b8bcd8';
+  ctx.font = '13px Arial, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  edWrapText(hint, x, ED_BOTTOM_Y + 46, 950, 17, 2);
+  edText('Right click erases  |  SHIFT+drag = rectangle  |  CTRL+Z undo  |  ENTER test  |  ? help', x, 698, 12, { color: '#8a8a9c', bold: false, max: 560 });
 }
 
 // --- help overlay ---
@@ -1447,14 +1329,12 @@ function drawEditorHelpOverlay() {
   ctx.fillStyle = 'rgba(8, 7, 13, 0.86)';
   ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-  const boxX = 150, boxY = 36, boxW = 900, boxH = 660;
+  const boxX = 110, boxY = 24, boxW = 980, boxH = 672;
   if (typeof uiCard === 'function') {
     ctx.save();
     ctx.shadowColor = '#8c44ff';
     ctx.shadowBlur = 24;
-    uiCard(boxX, boxY, boxW, boxH, {
-      fill: 'rgba(18, 16, 27, 0.97)', border: '#8c44ff', lineWidth: 3, scan: true
-    });
+    uiCard(boxX, boxY, boxW, boxH, { fill: 'rgba(18, 16, 27, 0.97)', border: '#8c44ff', lineWidth: 3, scan: true });
     ctx.restore();
   } else {
     ctx.fillStyle = '#12101b';
@@ -1467,474 +1347,82 @@ function drawEditorHelpOverlay() {
   ctx.fillStyle = '#9844ff';
   ctx.font = 'bold 30px Impact, monospace';
   ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
   ctx.fillText('LEVEL EDITOR HELP', GAME_WIDTH / 2, boxY + 40);
   ctx.fillStyle = 'rgba(255,255,255,0.08)';
-  ctx.fillRect(boxX + 40, boxY + 56, boxW - 80, 1);
+  ctx.fillRect(boxX + 40, boxY + 54, boxW - 80, 1);
 
   const sections = [
     ['BUILDING', [
       'Left click / drag ....... paint with the selected tool',
       'Right click / drag ...... erase (works with any tool)',
-      'SHIFT + drag ............ fill a whole rectangle',
-      'ALT while dragging ...... turn off snapping for fine tuning',
-      'TAB ..................... preview exactly what the player sees'
+      'SHIFT + drag ............ fill (or erase) a whole rectangle',
+      'TAB ..................... preview exactly what the player sees',
+      'Levels are the full game’s size: 32 x 18 tiles'
     ]],
-    ['SPIKE TRAPS (drag, never type)', [
-      'Click a spike with SELECT to tune it',
-      'Drag the red ghost ...... how far AND which way it shoots (8 ways)',
-      'Drag the yellow trigger . move it anywhere on the map',
-      'Drag a round handle ..... where the trigger starts / where it ends',
-      'Drag the spike itself ... move the whole trap to another tile',
-      'Direction pad ........... aim without dragging',
-      'Speed - / + ............. how fast the spike dashes',
-      'H ....................... full height trigger on / off',
-      'R / SHIFT+R ............. rotate the direction',
-      'Arrow keys .............. move the trigger (ALT = resize it)',
-      'DELETE .................. remove the selected spike'
+    ['TRAPS', [
+      'Trap spike (T) .......... press a tile, drag to aim it, then drag its trigger',
+      'Sliding spikes (L) ...... press a tile, drag to where they dash, then the trigger',
+      'SELECT (V) .............. click a spike or trigger to pick its trap',
+      'Drag a picked part ...... move it; drag the square corner to size a trigger',
+      'Panel ................... speed, delay, reach, dash, trigger on / visible,',
+      '                          + Spikes (they fire together), + Trigger',
+      'R / SHIFT+R ............. turn the picked trap spike (or the Spikes tool)',
+      'Arrow keys .............. move the picked trigger, flip zone or hint',
+      'ALT + arrows ............ size the picked trigger or flip zone',
+      'DELETE .................. remove what is picked'
     ]],
     ['TOOLS', [
-      'V select   B solid   F fake   I hidden   C crumble',
-      'K spike    G gravity  S spawn  D door    X eraser',
-      '0-9 ..................... spike range (also retunes a selected spike)',
-      'R rotate   - / + speed   H full-height trigger'
+      'V select  X erase   B solid   F fake   I invisible  C crumble',
+      'K spikes  T trap    L sliding U up     N down       G flip zone',
+      'S start   D door    O decoy   H hint text'
     ]],
     ['LEVEL', [
-      'CTRL+Z / CTRL+Y ......... undo / redo',
-      'CTRL+S .................. save',
+      'CTRL+Z / CTRL+Y ......... undo / redo          CTRL+S ... save',
       'SHIFT+F ................. fullscreen (or the FULL button, bottom right)',
-      'ENTER ................... test play      ESC ... back'
+      'ENTER ................... test play            ESC ...... back'
     ]]
   ];
 
   ctx.textAlign = 'left';
-  let y = boxY + 84;
+  let y = boxY + 80;
   sections.forEach(([title, lines]) => {
     ctx.fillStyle = '#ffcc44';
-    ctx.font = 'bold 17px Arial, sans-serif';
+    ctx.font = 'bold 16px Arial, sans-serif';
     ctx.fillText(title, boxX + 40, y);
-    y += 20;
+    y += 19;
     ctx.fillStyle = '#c8c8d6';
-    ctx.font = '14px monospace';
+    ctx.font = '13px monospace';
     lines.forEach(line => {
       ctx.fillText(line, boxX + 52, y);
-      y += 18;
+      y += 17;
     });
-    y += 8;
+    y += 7;
   });
 
   ctx.fillStyle = '#8a8a9c';
   ctx.font = '14px Arial, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('Click anywhere or press ? / ESC to close', GAME_WIDTH / 2, boxY + boxH - 18);
+  ctx.fillText('Click anywhere or press ? / ESC to close', GAME_WIDTH / 2, boxY + boxH - 16);
   ctx.textAlign = 'left';
 }
 
 // ===== PER-FRAME UPDATE =====
 function updateEditor(deltaTime) {
-  editorBlink = (editorBlink + deltaTime) % 1;
-  if (editorStatusTimer > 0) editorStatusTimer -= deltaTime;
-}
-
-// ===== EDITING OPERATIONS =====
-
-// Undo tokens: the snapshot is only kept if the action really changed something
-function beginEditorChange() {
-  return { snapshot: editorSnapshot(), committed: false };
-}
-
-function commitEditorChange(token) {
-  if (!token || token.committed) return;
-  editorUndoStack.push(token.snapshot);
-  if (editorUndoStack.length > ED_MAX_UNDO) editorUndoStack.shift();
-  editorRedoStack.length = 0;
-  editorDirty = true;
-  token.committed = true;
-}
-
-function toolChar(toolId) {
-  if (toolId === 'spike') return String(editorSpikeDistance);
-  const tool = EDITOR_TOOLS.find(t => t.id === toolId);
-  return tool ? tool.char : null;
-}
-
-// Write one tile. Returns true when the grid actually changed.
-function setEditorCell(row, col, char) {
-  const grid = editorDoc.grid;
-  if (row < 0 || row >= grid.length || col < 0 || col >= grid[row].length) return false;
-
-  const prev = grid[row][col];
-  if (prev === char) return false;
-
-  // Losing a spike means losing its trap settings - but swapping one spike for
-  // another (a different range) keeps the trigger the player already tuned.
-  if (isSpikeChar(prev) && !isSpikeChar(char)) {
-    delete editorDoc.spikeMeta[spikeKey(row, col)];
-    if (editorSelectedSpike && editorSelectedSpike.row === row && editorSelectedSpike.col === col) {
-      editorSelectedSpike = null;
-    }
-  }
-
-  // Spawn and door exist exactly once
-  if (char === 'S' || char === 'D') {
-    const existing = findEditorChar(char);
-    if (existing) grid[existing.row][existing.col] = '.';
-  }
-
-  grid[row][col] = char;
-  if (isSpikeChar(char)) getSpikeMeta(row, col);
-  return true;
-}
-
-// Paint every cell on the straight line between two cells so a fast drag
-// never leaves gaps.
-function paintEditorLine(from, to, char, token) {
-  let changed = false;
-  const steps = Math.max(Math.abs(to.row - from.row), Math.abs(to.col - from.col));
-
-  if (steps === 0) {
-    if (setEditorCell(to.row, to.col, char)) changed = true;
-  } else {
-    for (let i = 0; i <= steps; i++) {
-      const row = Math.round(from.row + (to.row - from.row) * (i / steps));
-      const col = Math.round(from.col + (to.col - from.col) * (i / steps));
-      if (setEditorCell(row, col, char)) changed = true;
-    }
-  }
-
-  if (changed) commitEditorChange(token);
-  return changed;
-}
-
-function fillEditorRect(a, b, char, token) {
-  const r0 = Math.min(a.row, b.row), r1 = Math.max(a.row, b.row);
-  const c0 = Math.min(a.col, b.col), c1 = Math.max(a.col, b.col);
-  let changed = false;
-
-  for (let r = r0; r <= r1; r++) {
-    for (let c = c0; c <= c1; c++) {
-      // Only one spawn/door can exist, so a rectangle of them makes no sense
-      if ((char === 'S' || char === 'D') && !(r === r1 && c === c1)) continue;
-      if (setEditorCell(r, c, char)) changed = true;
-    }
-  }
-  if (changed) commitEditorChange(token);
-  return changed;
-}
-
-function setSelectedSpikeDistance(distance) {
-  if (!editorSelectedSpike) return;
-  const { row, col } = editorSelectedSpike;
-  if (!isSpikeChar(editorDoc.grid[row][col])) return;
-  if (String(distance) === editorDoc.grid[row][col]) return;
-
-  pushEditorUndo();
-  editorDoc.grid[row][col] = String(distance);
-  getSpikeMeta(row, col);
-}
-
-function setSelectedSpikeDirection(direction) {
-  if (!editorSelectedSpike) return;
-  const meta = getSpikeMeta(editorSelectedSpike.row, editorSelectedSpike.col);
-  const clean = normalizeSpikeDirection(direction);
-  if (meta.dir === clean) return;
-
-  pushEditorUndo();
-  meta.dir = clean;
-  setEditorStatus('Spike shoots ' + SPIKE_DIRECTIONS[clean].arrow + ' ' + clean, '#ffdd33');
-}
-
-function setSelectedSpikeSpeed(speed) {
-  if (!editorSelectedSpike) return;
-  const meta = getSpikeMeta(editorSelectedSpike.row, editorSelectedSpike.col);
-  const clean = normalizeSpikeSpeed(speed);
-  if (meta.speed === clean) return;
-
-  pushEditorUndo();
-  meta.speed = clean;
-  setEditorStatus('Spike speed ' + clean + '  (' + (1 / clean).toFixed(2) + 's dash)', '#ffdd33');
-}
-
-function deleteSelectedSpike() {
-  if (!editorSelectedSpike) return;
-  const { row, col } = editorSelectedSpike;
-  pushEditorUndo();
-  setEditorCell(row, col, '.');
-  editorSelectedSpike = null;
-  setEditorStatus('Spike removed', '#ffaa66');
-}
-
-function clearEditorLevel() {
-  if (!confirm('Clear the whole level?\nThis can still be undone with CTRL+Z.')) return;
-  pushEditorUndo();
-  for (let r = 0; r < editorDoc.grid.length; r++) {
-    for (let c = 0; c < editorDoc.grid[r].length; c++) editorDoc.grid[r][c] = '.';
-  }
-  editorDoc.spikeMeta = {};
-  editorSelectedSpike = null;
-  setEditorStatus('Level cleared', '#ffaa66');
-}
-
-// ===== HANDLE HIT-TESTING =====
-
-function editorHitSpikeHandle(x, y) {
-  // Only the SELECT tool grabs handles - otherwise a trigger lying across the
-  // map would swallow clicks meant for painting.
-  if (editorTool !== 'select') return null;
-  if (!editorSelectedSpike) return null;
-  const { row, col } = editorSelectedSpike;
-  if (!isSpikeChar(editorDoc.grid[row][col])) return null;
-
-  const g = getSpikeGeometry(row, col);
-  if (g.digit === 0) return null; // A static spike has nothing to tune
-
-  const worldX = edScreenToWorldX(x);
-  const worldY = edScreenToWorldY(y);
-  const left = edWorldToScreenX(g.triggerX);
-  const right = edWorldToScreenX(g.triggerX + g.triggerW);
-  const tileW = TILE_SIZE * ED_SCALE;
-  const spikeH = (TILE_SIZE - 20) * ED_SCALE;
-
-  // 1) the two round handles: where the trigger starts and where it ends
-  const startY = Math.max(ED_GRID_Y + 6, Math.min(ED_GRID_Y + ED_GRID_H - 6, edWorldToScreenY(g.triggerY)));
-  const endY = Math.max(ED_GRID_Y + 6, Math.min(ED_GRID_Y + ED_GRID_H - 6, edWorldToScreenY(g.triggerY + g.triggerH)));
-  const near = (hx, hy) => (x - hx) * (x - hx) + (y - hy) * (y - hy) <= 169;
-
-  if (near(right, endY)) return { type: 'triggerEnd', row, col };
-  if (near(left, startY)) return { type: 'triggerStart', row, col };
-
-  // 2) ghost block = direction and distance
-  const ghostX = edWorldToScreenX(g.ghostX);
-  const ghostY = edWorldToScreenY(g.ghostY);
-  if (x >= ghostX && x <= ghostX + tileW && y >= ghostY && y <= ghostY + spikeH) {
-    // Remember where inside the ghost it was grabbed, so it does not jump
-    return {
-      type: 'ghost', row, col,
-      grabX: worldX - (g.ghostX + TILE_SIZE / 2),
-      grabY: worldY - (g.ghostY + (TILE_SIZE - 20) / 2)
-    };
-  }
-
-  // 3) the spike itself: drag it to another tile, trap and all
-  const spikeX = edWorldToScreenX(g.x);
-  const spikeTopY = edWorldToScreenY(g.spikeTop);
-  if (x >= spikeX && x <= spikeX + tileW && y >= spikeTopY && y <= spikeTopY + spikeH) {
-    return { type: 'spikeMove', row, col };
-  }
-
-  // 4) the trigger body: drag it anywhere on the map
-  const topY = Math.max(ED_GRID_Y, edWorldToScreenY(g.triggerY));
-  const botY = Math.min(ED_GRID_Y + ED_GRID_H, edWorldToScreenY(g.triggerY + g.triggerH));
-  const insideY = y >= topY - 5 && y <= botY + 5;
-  const insideX = g.isLine ? Math.abs(x - left) <= 7 : (x >= left - 4 && x <= right + 4);
-
-  if (insideX && insideY) {
-    return {
-      type: 'triggerMove', row, col,
-      grabX: worldX - g.triggerX,
-      grabY: worldY - g.triggerY
-    };
-  }
-
-  return null;
-}
-
-// ===== DRAG UPDATES =====
-
-// Snap step for trigger dragging: fine by default, half a tile with SHIFT,
-// completely free with ALT.
-function edTriggerSnap(value) {
-  if (editorModifiers.alt) return Math.round(value);
-  if (editorModifiers.shift) return edSnap(value, ED_TRIGGER_SNAP_COARSE);
-  return edSnap(value, ED_TRIGGER_SNAP);
-}
-
-// Drag the whole trigger anywhere on the map
-function updateTriggerMoveDrag(x, y) {
-  const { row, col } = editorDrag;
-  const meta = getSpikeMeta(row, col);
-  const tileX = col * TILE_SIZE;
-  const tileY = row * TILE_SIZE;
-
-  const worldX = edScreenToWorldX(x) - editorDrag.grabX;
-  const worldY = edScreenToWorldY(y) - editorDrag.grabY;
-
-  meta.area.x = edTriggerSnap(worldX - tileX);
-  meta.area.y = edTriggerSnap(worldY - tileY);
-  clampTriggerArea(meta.area, row, col);
-}
-
-// Drag either end of the trigger: "where it starts" and "where it ends"
-function updateTriggerCornerDrag(x, y, isEnd) {
-  const { row, col } = editorDrag;
-  const meta = getSpikeMeta(row, col);
-  const area = meta.area;
-  const tileX = col * TILE_SIZE;
-  const tileY = row * TILE_SIZE;
-
-  const worldX = edTriggerSnap(edScreenToWorldX(x) - tileX);
-  const worldY = edTriggerSnap(edScreenToWorldY(y) - tileY);
-
-  if (isEnd) {
-    // Bottom-right corner: pulling it back onto the start collapses the box
-    // into the classic zero-width line.
-    area.w = Math.max(0, worldX - area.x);
-    area.h = Math.max(ED_MIN_TRIGGER_HEIGHT, worldY - area.y);
-  } else {
-    // Top-left corner: keep the opposite corner pinned
-    const endX = area.x + area.w;
-    const endY = area.y + area.h;
-    area.x = Math.min(worldX, endX);
-    area.y = Math.min(worldY, endY - ED_MIN_TRIGGER_HEIGHT);
-    area.w = Math.max(0, endX - area.x);
-    area.h = Math.max(ED_MIN_TRIGGER_HEIGHT, endY - area.y);
-  }
-  clampTriggerArea(area, row, col);
-}
-
-// Keep a trigger reachable: it may hang off the map a little, never miles away
-function clampTriggerArea(area, row, col) {
-  const tileX = col * TILE_SIZE;
-  const tileY = row * TILE_SIZE;
-
-  area.w = Math.max(0, Math.min(GAME_WIDTH, area.w));
-  area.h = Math.max(ED_MIN_TRIGGER_HEIGHT, Math.min(GAME_HEIGHT, area.h));
-  area.x = Math.max(-tileX - TILE_SIZE, Math.min(GAME_WIDTH - tileX, area.x));
-  area.y = Math.max(-tileY - TILE_SIZE, Math.min(GAME_HEIGHT - tileY, area.y));
-}
-
-// Snap the trigger back to the full-height line the game uses by default
-function setTriggerFullHeight(row, col) {
-  const meta = getSpikeMeta(row, col);
-  meta.area.y = -row * TILE_SIZE;
-  meta.area.h = GAME_HEIGHT;
-  meta.area.w = 0;
-}
-
-// Drag the ghost: the direction is whichever of the eight is closest, the
-// distance is how many tiles away it was dropped.
-function updateSpikeGhostDrag(x, y) {
-  const { row, col } = editorDrag;
-  const meta = getSpikeMeta(row, col);
-  const spikeCenterX = col * TILE_SIZE + TILE_SIZE / 2;
-  const spikeCenterY = row * TILE_SIZE + 20 + (TILE_SIZE - 20) / 2;
-
-  const dx = edScreenToWorldX(x) - (editorDrag.grabX || 0) - spikeCenterX;
-  const dy = edScreenToWorldY(y) - (editorDrag.grabY || 0) - spikeCenterY;
-
-  const distance = Math.max(0, Math.min(9, Math.round(Math.sqrt(dx * dx + dy * dy) / TILE_SIZE)));
-  if (distance > 0) {
-    meta.dir = spikeDirectionFromVector(dx, dy);
-    editorSpikeDirection = meta.dir;
-  }
-
-  editorDoc.grid[row][col] = String(distance);
-  editorSpikeDistance = distance;
-}
-
-// Drag the spike itself onto another tile, taking its whole trap with it
-function updateSpikeMoveDrag(cell) {
-  const { row, col } = editorDrag;
-  if (cell.row === row && cell.col === col) return;
-
-  const grid = editorDoc.grid;
-  const target = grid[cell.row][cell.col];
-  // Never bulldoze another trap, the spawn or the exit
-  if (isSpikeChar(target) || target === 'S' || target === 'D') return;
-
-  const char = grid[row][col];
-  const meta = editorDoc.spikeMeta[spikeKey(row, col)];
-
-  grid[row][col] = editorDrag.under !== undefined ? editorDrag.under : '.';
-  editorDrag.under = target;
-  grid[cell.row][cell.col] = char;
-
-  delete editorDoc.spikeMeta[spikeKey(row, col)];
-  if (meta) {
-    // The trigger is stored relative to the tile, so it travels along
-    editorDoc.spikeMeta[spikeKey(cell.row, cell.col)] = meta;
-  }
-
-  editorDrag.row = cell.row;
-  editorDrag.col = cell.col;
-  editorSelectedSpike = { row: cell.row, col: cell.col };
-}
-
-function updateEntityDrag(cell) {
-  const grid = editorDoc.grid;
-  const target = grid[cell.row][cell.col];
-  if (isSpikeChar(target)) return; // Don't let a drag destroy a tuned spike
-  if (cell.row === editorDrag.at.row && cell.col === editorDrag.at.col) return;
-
-  // Put back whatever the marker was covering, then pick up the new tile
-  grid[editorDrag.at.row][editorDrag.at.col] = editorDrag.under;
-  editorDrag.under = target;
-  grid[cell.row][cell.col] = editorDrag.char;
-  editorDrag.at = cell;
+  ED.blink = (ED.blink + deltaTime) % 1;
+  ED.time += deltaTime;
+  if (ED.statusT > 0) ED.statusT -= deltaTime;
 }
 
 // ===== MOUSE INPUT =====
 
-function editorHandleButton(btn) {
-  if (btn.id.startsWith('tool:')) {
-    editorTool = btn.tool;
-    if (editorTool !== 'select' && editorTool !== 'spike') editorSelectedSpike = null;
-    return;
-  }
-
-  if (btn.id.startsWith('style:')) {
-    if (editorDoc.visualStyle !== btn.style) {
-      pushEditorUndo();
-      editorDoc.visualStyle = btn.style;
-      setEditorStatus('Visual style: ' + btn.label, '#cc99ff');
-    }
-    return;
-  }
-
-  if (btn.id.startsWith('spikeDist:')) {
-    editorSpikeDistance = btn.distance;
-    if (editorSelectedSpike) setSelectedSpikeDistance(btn.distance);
-    else editorTool = 'spike';
-    return;
-  }
-
-  if (btn.id.startsWith('spikeDir:')) {
-    editorSpikeDirection = btn.direction;
-    if (editorSelectedSpike) setSelectedSpikeDirection(btn.direction);
-    else editorTool = 'spike';
-    return;
-  }
-
-  if (btn.id.startsWith('spikeSpeed:')) {
-    const current = editorActiveSpikeSettings();
-    const next = edSpeedStep(current.speed, btn.step);
-    editorSpikeSpeed = next;
-    if (editorSelectedSpike) setSelectedSpikeSpeed(next);
-    return;
-  }
-
-  switch (btn.id) {
-    case 'back': leaveEditor(); break;
-    case 'name': editorNameEditing = true; editorBlink = 0; break;
-    case 'preview': editorPreviewMode = !editorPreviewMode; break;
-    case 'help': editorShowHelp = !editorShowHelp; break;
-    case 'test': editorTestPlay(); break;
-    case 'save': saveEditorLevel(false); break;
-    case 'grid': editorShowGrid = !editorShowGrid; break;
-    case 'undo': editorUndo(); break;
-    case 'redo': editorRedo(); break;
-    case 'clear': clearEditorLevel(); break;
-    case 'fullscreen': toggleFullscreen(); break;
-  }
-}
-
 function editorMouseDown(x, y, button, event) {
-  if (!editorDoc) return;
-  editorModifiers.shift = event.shiftKey;
-  editorModifiers.alt = event.altKey;
-  editorModifiers.ctrl = event.ctrlKey || event.metaKey;
+  if (!ED.map) return;
+  ED.shift = event.shiftKey;
+  ED.alt = event.altKey;
 
-  if (editorShowHelp) {
-    editorShowHelp = false;
+  if (ED.help) {
+    ED.help = false;
     return;
   }
 
@@ -1942,158 +1430,81 @@ function editorMouseDown(x, y, button, event) {
   const btn = edButtonAt(x, y);
 
   // Clicking anywhere else finishes renaming
-  if (editorNameEditing && (!btn || btn.id !== 'name')) {
-    editorNameEditing = false;
-    editorDoc.name = sanitizeLevelName(editorDoc.name);
+  if (ED.naming && (!btn || btn.kind !== 'name')) {
+    ED.naming = false;
+    ED.name = sanitizeLevelName(ED.name);
   }
 
   if (btn) {
-    if (button === 0) editorHandleButton(btn);
+    if (button === 0 && !btn.disabled) btn.action();
     return;
   }
-
-  if (!edPointInGrid(x, y)) return;
-  const rightClick = button === 2;
-
-  // Spike handles win over painting so a trap can be tuned without switching tools
-  if (!rightClick) {
-    const handle = editorHitSpikeHandle(x, y);
-    if (handle) {
-      editorDrag = Object.assign({ token: beginEditorChange() }, handle);
-      commitEditorChange(editorDrag.token);
-      return;
-    }
-  }
-
-  const cell = edScreenToCell(x, y);
-  if (!cell) return;
-  const char = editorDoc.grid[cell.row][cell.col];
-
-  // SELECT tool: pick a spike to tune, or drag the spawn / door marker
-  if (!rightClick && editorTool === 'select') {
-    if (isSpikeChar(char)) {
-      editorSelectedSpike = { row: cell.row, col: cell.col };
-      editorSpikeDistance = parseInt(char, 10) || 0;
-      // Keep the palette (and the next spike placed) in step with this one
-      const meta = getSpikeMeta(cell.row, cell.col);
-      editorSpikeDirection = meta.dir;
-      editorSpikeSpeed = meta.speed;
-      setEditorStatus('Spike selected - drag the ghost, the trigger or the spike itself', '#ffdd33');
-    } else if (char === 'S' || char === 'D') {
-      editorDrag = {
-        type: 'entity', char: char, at: { row: cell.row, col: cell.col }, under: '.',
-        token: beginEditorChange()
-      };
-      commitEditorChange(editorDrag.token);
-    } else {
-      editorSelectedSpike = null;
-    }
-    return;
-  }
-
-  // Painting / erasing
-  const paintChar = rightClick ? '.' : toolChar(editorTool);
-  if (paintChar === null) return;
-
-  const token = beginEditorChange();
-  if (event.shiftKey) {
-    editorDrag = { type: 'rect', anchor: { row: cell.row, col: cell.col }, char: paintChar, token };
-  } else {
-    editorDrag = { type: 'paint', char: paintChar, last: { row: cell.row, col: cell.col }, token };
-    paintEditorLine(cell, cell, paintChar, token);
-
-    // A freshly placed spike is selected and the SELECT tool takes over, so the
-    // ghost / trigger / length handles can be dragged straight away.
-    if (!rightClick && editorTool === 'spike') {
-      editorSelectedSpike = { row: cell.row, col: cell.col };
-      editorTool = 'select';
-      setEditorStatus('Spike placed - drag the ghost to aim it, the trigger to place it. K for another.', '#ffdd33');
-    }
-  }
+  if (button !== 0 && button !== 2) return;
+  edDown(x, y, button === 2, event.shiftKey);
 }
 
 function editorMouseMove(x, y, event) {
-  if (!editorDoc) return;
-  editorModifiers.shift = event.shiftKey;
-  editorModifiers.alt = event.altKey;
-  editorMouse.x = x;
-  editorMouse.y = y;
-  editorHoverCell = edPointInGrid(x, y) ? edScreenToCell(x, y) : null;
-
-  if (!editorDrag) return;
-
-  switch (editorDrag.type) {
-    case 'paint': {
-      const cell = edScreenToCell(
-        Math.max(ED_GRID_X, Math.min(ED_GRID_X + ED_GRID_W - 1, x)),
-        Math.max(ED_GRID_Y, Math.min(ED_GRID_Y + ED_GRID_H - 1, y))
-      );
-      if (!cell) return;
-      if (cell.row === editorDrag.last.row && cell.col === editorDrag.last.col) return;
-      paintEditorLine(editorDrag.last, cell, editorDrag.char, editorDrag.token);
-      editorDrag.last = cell;
-      if (isSpikeChar(editorDrag.char)) editorSelectedSpike = { row: cell.row, col: cell.col };
-      break;
-    }
-    case 'triggerMove': updateTriggerMoveDrag(x, y); break;
-    case 'triggerStart': updateTriggerCornerDrag(x, y, false); break;
-    case 'triggerEnd': updateTriggerCornerDrag(x, y, true); break;
-    case 'ghost': updateSpikeGhostDrag(x, y); break;
-    case 'spikeMove': {
-      if (editorHoverCell) updateSpikeMoveDrag(editorHoverCell);
-      break;
-    }
-    case 'entity': {
-      if (editorHoverCell) updateEntityDrag(editorHoverCell);
-      break;
-    }
-  }
+  if (!ED.map) return;
+  ED.shift = event.shiftKey;
+  ED.alt = event.altKey;
+  ED.mouse.x = x;
+  ED.mouse.y = y;
+  edMove(x, y);
 }
 
-function editorMouseUp(x, y) {
-  if (!editorDoc || !editorDrag) return;
-
-  if (editorDrag.type === 'rect') {
-    const cell = editorHoverCell || editorDrag.anchor;
-    fillEditorRect(editorDrag.anchor, cell, editorDrag.char, editorDrag.token);
-    if (editorDrag.char !== '.' && isSpikeChar(editorDrag.char)) {
-      editorSelectedSpike = { row: cell.row, col: cell.col };
-    }
-  }
-  editorDrag = null;
+function editorMouseUp() {
+  if (!ED.map || !ED.drag) return;
+  edUp();
 }
 
 // ===== KEYBOARD INPUT =====
 
 function editorHandleNameKey(e) {
   if (e.key === 'Enter' || e.key === 'Escape' || e.key === 'Tab') {
-    editorNameEditing = false;
-    editorDoc.name = sanitizeLevelName(editorDoc.name);
-    editorDirty = true;
+    ED.naming = false;
+    ED.name = sanitizeLevelName(ED.name);
+    ED.unsaved = true;
+    ED.dirty = true;
     e.preventDefault();
     return;
   }
   if (e.key === 'Backspace') {
-    editorDoc.name = editorDoc.name.slice(0, -1);
-    editorDirty = true;
+    ED.name = ED.name.slice(0, -1);
+    ED.unsaved = true;
     e.preventDefault();
     return;
   }
-  if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && editorDoc.name.length < 28) {
-    editorDoc.name += e.key;
-    editorDirty = true;
+  if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && ED.name.length < 32) {
+    ED.name += e.key;
+    ED.unsaved = true;
     e.preventDefault();
   }
 }
 
+// Arrow keys: the picked trigger, flip zone or hint moves (ALT: a trigger or flip zone changes size).
+function edNudge(dx, dy, resize) {
+  const s = ED.sel, part = edPartOf(s);
+  if (!part || s.part === 'spike' || s.part === 'slide') return false;
+  const clamp = LK.clamp;
+  edChange(() => {
+    if (s.part === 'text') { part.x = clamp(part.x + dx * 10, 0, LK.W); part.y = clamp(part.y + dy * 10, 0, LK.H); return; }
+    if (resize) {
+      if (part.w) part.w = clamp(part.w + dx, 1, LK.COLS - Math.floor(part.c));
+      part.h = clamp(part.h + dy, 1, LK.ROWS - Math.floor(part.r));
+      return;
+    }
+    part.c = clamp(part.c + dx, part.w || s.part === 'flip' ? 0 : 0.5, LK.COLS - (part.w || 0.5));
+    part.r = clamp(part.r + dy, 0, LK.ROWS - part.h);
+  });
+  return true;
+}
+
 function editorKeyDown(e) {
-  if (!editorDoc) return;
+  if (!ED.map) return;
+  ED.shift = e.shiftKey;
+  ED.alt = e.altKey;
 
-  editorModifiers.shift = e.shiftKey;
-  editorModifiers.alt = e.altKey;
-  editorModifiers.ctrl = e.ctrlKey || e.metaKey;
-
-  if (editorNameEditing) {
+  if (ED.naming) {
     editorHandleNameKey(e);
     return;
   }
@@ -2119,17 +1530,16 @@ function editorKeyDown(e) {
 
   if (e.key === '?' || e.code === 'F1') {
     e.preventDefault();
-    editorShowHelp = !editorShowHelp;
+    ED.help = !ED.help;
     return;
   }
 
   if (e.code === 'Escape') {
     e.preventDefault();
-    if (editorShowHelp) { editorShowHelp = false; return; }
-    if (editorSelectedSpike) { editorSelectedSpike = null; return; }
-    leaveEditor();
+    edEscape();
     return;
   }
+  if (ED.help) return;
 
   if (e.code === 'Enter' || e.code === 'NumpadEnter') {
     e.preventDefault();
@@ -2139,89 +1549,25 @@ function editorKeyDown(e) {
 
   if (e.code === 'Tab') {
     e.preventDefault();
-    editorPreviewMode = !editorPreviewMode;
+    ED.preview = !ED.preview;
     return;
   }
 
   if (e.code === 'Delete' || e.code === 'Backspace') {
     e.preventDefault();
-    deleteSelectedSpike();
+    edRemoveSelected();
     return;
   }
 
-  // Digits: spike range. Retunes the selected spike, otherwise arms the tool.
-  if (/^(Digit|Numpad)[0-9]$/.test(e.code)) {
-    const distance = parseInt(e.code.slice(-1), 10);
-    if (editorSelectedSpike) {
-      setSelectedSpikeDistance(distance);
-      editorSpikeDistance = distance;
-    } else {
-      editorSpikeDistance = distance;
-      editorTool = 'spike';
-    }
-    return;
-  }
-
-  // Trigger fine-tuning with the arrow keys: move it, or resize with ALT
-  if (editorSelectedSpike && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.code)) {
+  const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+  if (arrows[e.code]) {
     e.preventDefault();
-    const { row, col } = editorSelectedSpike;
-    const meta = getSpikeMeta(row, col);
-    const step = e.shiftKey ? TILE_SIZE / 2 : ED_TRIGGER_SNAP;
-    const dx = (e.code === 'ArrowLeft' ? -step : 0) + (e.code === 'ArrowRight' ? step : 0);
-    const dy = (e.code === 'ArrowUp' ? -step : 0) + (e.code === 'ArrowDown' ? step : 0);
-
-    if (e.altKey) {
-      // Resize from the end corner
-      meta.area.w = Math.max(0, meta.area.w + dx);
-      meta.area.h = Math.max(ED_MIN_TRIGGER_HEIGHT, meta.area.h + dy);
-    } else {
-      meta.area.x += dx;
-      meta.area.y += dy;
-    }
-    clampTriggerArea(meta.area, row, col);
-    editorDirty = true;
+    edNudge(arrows[e.code][0], arrows[e.code][1], e.altKey);
     return;
   }
 
-  // H: snap the selected trigger back to the full screen height
-  if (e.code === 'KeyH') {
-    if (editorSelectedSpike) {
-      const { row, col } = editorSelectedSpike;
-      const g = getSpikeGeometry(row, col);
-      const meta = getSpikeMeta(row, col);
-      pushEditorUndo();
-      if (g.isFull) {
-        meta.area.y = -20;   // a 120px band centred on the spike top
-        meta.area.h = 120;
-        setEditorStatus('Trigger limited to 120px', '#ffdd33');
-      } else {
-        setTriggerFullHeight(row, col);
-        setEditorStatus('Trigger covers the full height', '#ffdd33');
-      }
-    }
-    return;
-  }
-
-  // R: rotate the selected spike through the eight directions
   if (e.code === 'KeyR') {
-    const current = editorActiveSpikeSettings();
-    const order = ['right', 'downRight', 'down', 'downLeft', 'left', 'upLeft', 'up', 'upRight'];
-    const next = order[(order.indexOf(normalizeSpikeDirection(current.dir)) + (e.shiftKey ? order.length - 1 : 1)) % order.length];
-    editorSpikeDirection = next;
-    if (editorSelectedSpike) setSelectedSpikeDirection(next);
-    else setEditorStatus('New spikes shoot ' + SPIKE_DIRECTIONS[next].arrow + ' ' + next, '#ffdd33');
-    return;
-  }
-
-  // - / + : how fast the selected spike dashes
-  if (e.code === 'Minus' || e.code === 'NumpadSubtract' || e.code === 'Equal' || e.code === 'NumpadAdd') {
-    const up = e.code === 'Equal' || e.code === 'NumpadAdd';
-    const current = editorActiveSpikeSettings();
-    const next = edSpeedStep(current.speed, up ? 1 : -1);
-    editorSpikeSpeed = next;
-    if (editorSelectedSpike) setSelectedSpikeSpeed(next);
-    else setEditorStatus('New spike speed ' + next, '#ffdd33');
+    edTurn(e.shiftKey);
     return;
   }
 
@@ -2233,10 +1579,6 @@ function editorKeyDown(e) {
   }
 
   // Tool shortcuts
-  const tool = EDITOR_TOOLS.find(t => t.keyCode === e.code);
-  if (tool) {
-    editorTool = tool.id;
-    if (tool.id !== 'select' && tool.id !== 'spike') editorSelectedSpike = null;
-    return;
-  }
+  const id = ED_TOOL_ORDER.find(k => 'Key' + ED_TOOLS[k].key === e.code);
+  if (id) edSetTool(id);
 }

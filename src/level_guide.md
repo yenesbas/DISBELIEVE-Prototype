@@ -1,11 +1,12 @@
 # How to Build Your Own Levels
 
 > **Building a level as a player?** Use the in-game editor instead: main menu ->
-> **MY LEVELS**. It does everything described below by dragging, and it writes
-> this exact format. See [`editor/EDITOR_GUIDE.md`](editor/EDITOR_GUIDE.md).
+> **MY LEVELS**. It makes levels for the full game, in the full game's own
+> format (32 x 18 tiles), not this one. See
+> [`editor/EDITOR_GUIDE.md`](editor/EDITOR_GUIDE.md).
 >
-> This document describes the level format itself, for levels written by hand
-> into `src/levels/chapter_*.js`.
+> This document describes the format of this prototype's own chapters, for
+> levels written by hand into `src/levels/chapter_*.js`.
 
 ## Level Map Characters
 - `.`  = Empty space (air)

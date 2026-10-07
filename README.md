@@ -44,24 +44,33 @@ until you finish every level of every chapter *and* hold a two-star average
 across all of them - 30 levels and 60 of the 90 stars once all three chapters
 are full. The menu shows how many levels and stars you still need.
 
-Traps are built by hand, right on the map - there is not a single number box in
-the editor:
+Levels built here are levels for the **full DISBELIEVE game**: the same
+32 x 18 screen, the same blocks, spikes and zones, the same level format and the
+same physics. A level that works here works there, frame for frame.
 
-- **Paint** platforms, fake blocks, invisible blocks and crumbling blocks by
-  dragging the mouse (hold SHIFT to fill a rectangle).
-- **Drop a spike**, then drag its *ghost* to aim it: spikes shoot in any of
-  **eight directions**, not just to the right.
-- **Set its speed** from a slow creep you can outrun to an instant snap.
-- **Put its trigger anywhere** on the map - drag the trigger itself to move it,
-  and drag either round handle to say where it starts and where it ends. Pull it
-  sideways and the trigger line becomes a trigger *box*.
-- **Move a finished trap** by dragging the spike; its trigger, direction and
-  speed all come along.
+Traps are built by hand, right on the map:
+
+- **Paint** solid ground, fake blocks, invisible blocks and crumbling blocks by
+  dragging the mouse (hold SHIFT to fill a rectangle). Crumbling blocks can be
+  set to come back after a while.
+- **Spikes** in plain sight, pointing any of four ways.
+- **Trap spikes** stay hidden until their trap fires: press a tile and drag to
+  aim (eight directions), then drag the **trigger** that fires it - a box to
+  touch or a line to cross, hidden or visible.
+- **Sliding spikes** sit in plain sight and dash somewhere when triggered.
+- A **trap** fires together: give it more spikes or more triggers, and set its
+  speed (creep, fast, snap), delay, reach and dash from the panel.
+- **Gravity** zones that pull up or down, and **flip zones** that flip gravity
+  whichever way it is.
+- **Decoy doors** that look exactly like the exit, and **hint text** that can
+  wait for a number of deaths.
 - **TEST PLAY** the level at any moment, then ESC straight back to building.
-- **Export** a level to a file and send it to a friend, or **import** theirs.
+- **Share** a level as a code or a link, **load** a friend's code, or
+  **export** / **import** level files.
 
 Your levels are saved in the browser and keep their own death records. Full
-instructions: [`src/editor/EDITOR_GUIDE.md`](src/editor/EDITOR_GUIDE.md)
+instructions, including how a level gets into the full game:
+[`src/editor/EDITOR_GUIDE.md`](src/editor/EDITOR_GUIDE.md)
 
 ## 🏆 Features
 
@@ -69,8 +78,9 @@ instructions: [`src/editor/EDITOR_GUIDE.md`](src/editor/EDITOR_GUIDE.md)
 - Deceptive traps and spikes that shoot in any of eight directions, at any speed
 - Triggers that can sit anywhere on the map, as a line or as a box
 - Fake platforms that look solid but aren't
-- A level editor with drag-to-tune traps, plus level sharing - unlocked by
-  clearing all three chapters with a two-star average
+- A level editor that makes levels for the full game, with every trap it has,
+  plus level sharing by code, link or file - unlocked by clearing all three
+  chapters with a two-star average
 - Fullscreen on one key, remembered for next time - or from SETTINGS and the
   pause menu
 - Death counter to track your attempts
@@ -88,8 +98,10 @@ Things are not always what they seem. Trust your instincts, but be prepared to..
 - No external libraries required
 - Responsive design: the game is drawn in a fixed 1200x720 space and then
   scaled to fill the window - or the whole screen in fullscreen - rendering at
-  the display's own pixel density, so it is sharp at any size
-- Custom physics engine
+  the display's own pixel density, so it is sharp at any size; player-made
+  levels are the full game's 1920x1080 screen, shown across the whole width
+- Custom physics engine; player-made levels run on the full game's own physics
+  at a fixed 60 steps a second
 - Prototype-focused clean codebase
 
 ## 🎯 Prototype Scope
@@ -109,8 +121,11 @@ For developers interested in the technical aspects:
 - The main entry point is `play.html`
 - Chapter levels live in `src/levels/chapter_*.js` - see `src/level_guide.md`
 - The level editor lives in `src/editor/`:
+  - `levelkit.js` - the full game's level format, share codes and physics
+  - `level_play.js` - drawing and playing those levels
   - `level_storage.js` - saving, validation and level sharing
   - `editor.js` - the editor screen
   - `custom_levels.js` - the "My Levels" browser and custom play sessions
-- Player-made levels use the exact same format as the built-in chapters, so a
-  level can be moved between the editor and a chapter file by copy/paste
+- Player-made levels are the full game's levels (its format 3, 32 x 18 tiles)
+  and run on its physics; the chapters keep this prototype's own engine and
+  format

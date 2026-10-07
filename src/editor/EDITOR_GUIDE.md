@@ -2,9 +2,13 @@
 
 Open the game, pick **MY LEVELS** in the main menu, then **+ NEW LEVEL**.
 
-Everything in a level is built by hand on the map itself. Nothing is typed into
-a number box - you drag the trap until it looks right, press TEST PLAY, and
-adjust.
+Levels made here are levels for the **full DISBELIEVE game**: the same screen
+(32 x 18 tiles, one 1920 x 1080 screen), the same kinds of blocks, spikes and
+zones, the same level format and the same physics. A level that works here
+works there, frame for frame.
+
+Everything in a level is built by hand on the map itself. You drag a trap until
+it looks right, press TEST PLAY, and adjust.
 
 ---
 
@@ -16,9 +20,7 @@ it. You need to:
 - finish **every level of every chapter** (bonus levels do not count), and
 - hold a **two-star average** across all of them.
 
-With three full chapters of ten levels that is 30 levels and 60 of the 90
-possible stars. The main menu shows exactly how many levels and stars you still
-need, so you can see yourself getting closer.
+The main menu shows exactly how many levels and stars you still need.
 
 ---
 
@@ -28,167 +30,157 @@ need, so you can see yourself getting closer.
 | --- | --- |
 | Left click / drag | Paint with the selected tool |
 | Right click / drag | Erase (works no matter which tool is selected) |
-| SHIFT + drag | Fill a whole rectangle - the fast way to lay a floor |
-| ALT while dragging a handle | Turn snapping off for fine tuning |
+| SHIFT + drag | Fill (or erase) a whole rectangle |
 | TAB | Preview: hides every editor marker so you see exactly what the player sees |
 | CTRL+Z / CTRL+Y | Undo / redo |
 | SHIFT+F | Fullscreen, same as the FULL button in the bottom bar (plain F paints fake blocks) |
 | CTRL+S | Save |
 | ENTER | Test play |
-| ESC | Back (offers to save first) |
+| ESC | Stop drawing a trigger, then drop the pick, then back (offers to save first) |
 | ? | Help |
 
 ### Tools
 
 | Key | Tool | In game |
 | --- | --- | --- |
-| `V` | Select | Pick a spike to tune, or drag the spawn / door |
-| `B` | Solid | A normal platform |
-| `F` | Fake | Looks exactly like a platform, player falls through it |
-| `I` | Hidden | Solid, but completely invisible while playing |
-| `C` | Crumble | Breaks away shortly after the player stands on it |
-| `K` | Spike | A trap that shoots off in any of eight directions when triggered |
-| `G` | Gravity | A zone that flips gravity |
-| `S` | Spawn | Where the player starts (one per level) |
-| `D` | Door | The exit (one per level) |
-| `X` | Eraser | Clears tiles |
+| `V` | Select | Pick a trap, a flip zone or a hint to change it; drag the start, the door and decoy doors |
+| `X` | Erase | Clears tiles, doors, spikes, flip zones and hints |
+| `B` | Solid | Ground |
+| `F` | Fake | Looks exactly like ground, the square falls straight through it |
+| `I` | Invisible | Empty air that is secretly solid; it shows faintly once touched |
+| `C` | Crumble | Holds for 0.6 s once the square lands on it, then falls |
+| `K` | Spikes | Spikes in plain sight, pointing up, right, down or left (`R` turns them) |
+| `T` | Trap spike | A hidden spike that shoots out when its trap fires |
+| `L` | Sliding spikes | Spikes in plain sight that dash somewhere when their trap fires |
+| `U` | Gravity up | A cyan zone: gravity flips up as the square enters it |
+| `N` | Gravity down | A magenta zone: gravity turns back down |
+| `G` | Flip zone | Flips gravity whichever way it is, every time the square enters it |
+| `S` | Start | Where the square appears (one per level) |
+| `D` | Door | The exit (one per level). On a floor, or under a ceiling to hang upside down |
+| `O` | Decoy door | Looks exactly like the exit. It kills |
+| `H` | Hint text | Words on the level; they can wait for a number of deaths |
 
-Fake, hidden and crumbling tiles are labelled in the editor (`FAKE`, `HID`,
-`CRUMB`) so you can tell them apart. Press TAB to see the level without those
-labels - that view is what the player gets.
+Fake blocks, invisible blocks and decoy doors are marked in the editor so you
+can tell them apart. Press TAB to see the level the way the player gets it.
+
+The **Crumble** tool's panel also sets whether fallen blocks **come back**
+(never, or after 1, 2, 3.5 or 5 seconds) - for the whole level.
 
 ---
 
-## Spike traps - the part you drag
+## Traps - the part you drag
 
-Place a spike and it is selected immediately. Everything about the trap is then
-dragged straight on the map:
+A **trap** is everything that fires together, and what fires it: one or more
+trap spikes and sliding spikes, and one or more triggers. Every trap has its own
+color and number, and a dashed line runs from each of its triggers to each of
+its spikes.
 
-```
-     the trigger                the spike          the ghost
-     (drag it anywhere,         (drag it to        (drag it to aim
-      drag either O to           another tile)      and to set range)
-      resize it)
-          O-------+                  ###                - - -
-          |       |                  ###    - - - >     - - -
-          |       |
-          +-------O
-```
+**A trap spike** - pick the Trap spike tool, press a tile and drag toward where
+it should shoot (eight directions). Let go, and drag again to draw the
+**trigger** that fires it. A trigger is a box the square has to touch, or (with
+"Trigger shape: line") a line it has to cross. Right-click or ESC skips the
+trigger for now; the bar under the map reminds you that the trap never fires.
 
-**Red ghost** - drag it to set how far the spike travels (0 to 9 tiles) **and
-which way it goes**. Drop it above the spike and the spike shoots up; drop it
-down and to the left and it shoots down-left. Eight directions in all. A range
-of `0` means the spike never moves and has no trigger.
+A trap spike can sit inside a solid block - it bursts out of the wall.
 
-**Yellow trigger** - drag its body to move it **anywhere on the map**. It does
-not have to sit next to the spike any more: put it across a doorway, under a
-jump, or on the far side of the level.
+**Sliding spikes** - pick the Sliding spikes tool, press a tile and drag to
+where they should dash, then draw the trigger.
 
-**The two round handles** - one sits where the trigger starts (top-left), the
-other where it ends (bottom-right). Drag them to set its size:
+**SELECT** (`V`) changes a trap: click one of its spikes or triggers to pick it.
 
-- Pull the end handle sideways and the line becomes a **box** - the player only
-  sets it off by standing inside it.
-- Pull the end handle back onto the start and the box collapses into the
-  classic thin line.
-- Press `H` to snap the trigger back to a full-height line, or `H` again to cut
-  it down to a short one.
+- Drag a spike to another tile, or a trigger anywhere on the map.
+- Drag the small square at a trigger's corner to resize it.
+- Arrow keys move the picked trigger; ALT + arrow keys resize it.
+- `R` / `SHIFT+R` turns the picked trap spike an eighth of a turn.
+- `DELETE` removes the picked part. A trap goes when its last spike does.
 
-**The spike itself** - drag it to another tile. The trigger, direction and speed
-all travel with it, so a finished trap can be repositioned in one go. A spike
-will not drop onto another spike, the spawn or the exit.
+### The panel under the palette
 
-### Direction and speed, without dragging
-
-While a spike is selected the tool column shows three controls:
+With a trap picked:
 
 | Control | What it does |
 | --- | --- |
-| **RANGE** `0-9` | How many tiles it travels |
-| **DIRECTION** pad | Eight arrows - click one to aim the spike |
-| **SPEED** `-` / `+` | How fast it covers that distance |
+| **Speed** | Creep (you can outrun it), Fast, or Snap |
+| **Delay** | How long after the trigger the spikes shoot (0 to 0.5 s) |
+| **Reach** | How far trap spikes fly: until they hit a wall, or 1 to 5 tiles |
+| **Dash** | How long sliding spikes take to dash (0.2 to 2 s) |
+| **Trigger** | On, or off (kept, but never fires) |
+| **Visible** | Hidden triggers are never drawn; visible ones pulse until they fire |
+| **New triggers** | Box or line |
+| **+ Spikes** | Spikes you place now join this trap and fire with it |
+| **+ Trigger** | Draw another trigger for this trap: any of them fires it |
 
-Speed is shown both as a number and as the real dash time. `5` is the classic
-0.2s snap the game has always used. Turn it down to `1` and the spike creeps
-across so the player can watch it coming and try to outrun it; turn it up to
-`20` and it is there before they can react.
-
-Set these **before** placing a spike and every new spike gets them, so a whole
-row of upward spikes takes one click each.
-
-| Key | While a spike is selected |
-| --- | --- |
-| `0`-`9` | Range |
-| `R` / `SHIFT+R` | Rotate the direction one step |
-| `-` / `+` | Slower / faster |
-| `H` | Full-height trigger on / off |
-| Arrow keys | Move the trigger (`SHIFT` = half a tile) |
-| `ALT` + arrows | Resize the trigger |
-| `DELETE` | Remove the spike |
-
-While dragging: nothing held snaps to 10px, `SHIFT` snaps to half a tile, and
-`ALT` turns snapping off completely.
-
-The exact numbers are always shown in the bar at the bottom of the editor.
+Set these with the Trap spike or Sliding spikes tool before placing, and every
+new trap gets them.
 
 ---
 
-## Gravity zones
+## Flip zones and hints
 
-Paint `G` tiles with the gravity tool. Tiles that touch each other become one
-zone, and the editor draws the zone exactly as the game will build it - so if
-the shape you paint is not a rectangle, you will see the rectangle it turns into.
+**Flip zone** (`G`): drag a rectangle. With it picked, the panel sets the wait
+between two flips. Drag it to move it, drag its corner to size it.
+
+**Hint text** (`H`): click where it goes and type it. `{move}` and `{jump}` show
+the keys. The panel sets its size and when it shows: always, after 1, 2, 3 or 5
+deaths, or only before the first death.
 
 ---
 
 ## Saving and sharing
 
 Levels are saved in your browser (localStorage), so they stay on the computer
-you built them on.
+you built them on. Levels made with the first version of this editor (20 x 12)
+are moved into the bigger screen automatically, in its bottom left corner; test
+them again, the physics changed a little.
 
-- **EXPORT** (`↑` on a level card) writes a `.disbelieve.json` file.
-- **IMPORT** loads one or more of those files - send them to a friend and they
-  can play your level.
-- **EXPORT ALL** backs up everything you made in one file.
+- **SHARE** (in the editor, or on a level card) copies a **share code** - or,
+  when the game runs from a web page, a link that opens the level.
+- **LOAD CODE** in My Levels pastes a code or link in as a new level. Codes
+  from the full game work too.
+- **EXPORT** (`↑` on a level card) writes a `.disbelieve.json` file; **EXPORT
+  ALL** writes every level in one file. **IMPORT** loads them (and files from
+  the first version of the editor).
 
 Custom levels have their own death and time records. They never touch chapter
 progress or unlocks.
 
 ---
 
-## For developers
+## Into the full game
 
-Custom levels are stored in exactly the same shape the built-in chapters use:
+A share code goes into the full game's **My levels → Load from code**, as it is.
+
+An exported file is a level pack's JSON - exactly what sits inside
+`LEVEL_PACK( ... )` in the full game's `levels/*.js`:
 
 ```js
 {
-  name: "My Level",
-  map: [ "....................", ... ],   // 12 rows x 20 columns
-  spikeTriggers: [ -0.5, 2.5 ],            // one entry per spike, reading order
-  spikeTriggerLengths: [ null, 180 ],      // null = full height
-  spikeTriggerAreas: [ null, { x: -120, y: -60, w: 90, h: 100 } ],
-  spikeDirections: [ "right", "upLeft" ],  // one of eight, default "right"
-  spikeSpeeds: [ 5, 1 ],                   // dash takes 1 / speed seconds
-  visualStyle: "default" | "neon" | "sketch"
+  "format": 3,
+  "levels": [
+    {
+      "id": "p-mfz1k2ab",                 // unique per level
+      "name": "My Level",
+      "style": "neon",                     // gray | neon | paper (CLASSIC / NEON / SKETCH here)
+      "tiles": { "solid": [[0, 15, 32, 3]], "fake": [[12, 15, 2, 1]] },
+      "start": [2, 14],
+      "door": [28, 14],
+      "traps": [
+        { "spikes": [{ "c": 10, "r": 14, "dir": "up", "speed": 900 }],
+          "triggers": [{ "c": 7, "r": 10, "w": 2, "h": 5 }] }
+      ]
+    }
+  ]
 }
 ```
 
-`spikeTriggerAreas` is the free-form trigger rectangle, in pixels relative to
-the spike's own tile. It is only written for spikes whose trigger was actually
-reshaped - a trigger that still fits the old line format keeps saving as
-`spikeTriggers` + `spikeTriggerLengths`, so levels stay readable and older
-copies of the game can still play them.
-
-So a level built in the editor can be pasted straight into
-`src/levels/chapter_*.js`, and a chapter level can be pasted into a custom level
-file and opened in the editor.
-
-The editor keeps spike settings keyed by tile position and only flattens them
-into those arrays on save, which is why adding a spike in the middle of a
-level never shifts anyone else's trigger.
+To add levels to the full game, copy them into the `"levels"` list of its
+`levels/drafts.js`, then open the makers' editor and move them into a chapter.
+The full format is described at the top of `levelkit.js`.
 
 Files:
 
+- `levelkit.js` - the full game's level format, share codes and physics
+- `level_play.js` - drawing those levels and playing them
 - `level_storage.js` - localStorage saving, validation, import/export
 - `editor.js` - the editor screen and all of its interaction
 - `custom_levels.js` - the My Levels browser and custom play sessions

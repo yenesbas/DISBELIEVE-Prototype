@@ -1,157 +1,90 @@
 /*
  * LEVEL_STORAGE.JS - Saving system for player-made levels
  *
- * Custom levels live in localStorage under a single key. Every level is stored
- * in the SAME format the built-in chapters use (map + spikeTriggers +
- * spikeTriggerLengths), so a player level can be pasted straight into a
- * chapter file, and a chapter level can be pasted into the editor.
+ * Player levels are kept in the full DISBELIEVE game's level format (format 3,
+ * see levelkit.js), so a level built here can go straight into the full game:
+ * as a share code (the full game's "Load from code" reads it), or as a file
+ * whose JSON is a level pack's: { "format": 3, "levels": [ ... ] }.
  *
- * Stored shape:
+ * Only these levels are stored here. The prototype's own progress (chapters,
+ * stars, colours) stays where it always was, in game.js.
+ *
+ * Stored shape (localStorage 'disbelieveMyLevels'):
  * {
- *   version: 1,
+ *   version: 2,
  *   levels: [
  *     {
- *       id: "lvl_...", name: "My Level", visualStyle: "default",
- *       map: ["....", ...], spikeTriggers: [...], spikeTriggerLengths: [...],
- *       spikeTriggerAreas: [...], spikeDirections: [...], spikeSpeeds: [...],
+ *       id: "p-...",                         also the level's id in an exported file
+ *       level: { name, style, tiles, start, door, traps, ... },   format 3, without an id
  *       created: 1700000000000, modified: 1700000000000,
  *       stats: { plays: 0, wins: 0, bestDeaths: null, bestTime: null }
  *     }
  *   ]
  * }
+ *
+ * Levels saved by this prototype's first editor (20 x 12 maps, under
+ * 'disbelieveCustomLevels') are converted the first time this runs; the old
+ * entry is left as it was.
  */
 
-const CUSTOM_LEVELS_KEY = 'disbelieveCustomLevels';
-const CUSTOM_LEVELS_VERSION = 1;
+const CUSTOM_LEVELS_KEY = 'disbelieveMyLevels';
+const OLD_CUSTOM_LEVELS_KEY = 'disbelieveCustomLevels';
+const CUSTOM_LEVELS_VERSION = 2;
 
-// The playfield is exactly 20 x 12 tiles (1200 x 720 at TILE_SIZE 60),
-// so every custom level uses that grid. No scrolling camera exists.
-const EDITOR_COLS = 20;
-const EDITOR_ROWS = 12;
+// The playfield is the full game's: 32 x 18 tiles (1920 x 1080 at TILE_SIZE 60).
+const EDITOR_COLS = LK.COLS;
+const EDITOR_ROWS = LK.ROWS;
 
-// Characters the level parser understands. Anything else gets turned into air.
-const VALID_LEVEL_CHARS = '.#FIESD0123456789^Gg';
-
-// Visual styles a player can pick for their level (matches chapter styles)
-const CUSTOM_VISUAL_STYLES = [
-  { id: 'default', label: 'CLASSIC' },
-  { id: 'neon', label: 'NEON' },
-  { id: 'sketch', label: 'SKETCH' }
-];
+// Visual styles a player can pick for their level: the full game's three, drawn in this prototype's looks
+const CUSTOM_VISUAL_STYLES = LK.LEVEL_STYLES.map(id => ({ id, label: LK_STYLE_NAMES[id] }));
 
 // ===== BASIC HELPERS =====
 
 function makeCustomLevelId() {
-  return 'lvl_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+  return 'p-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-function blankLevelRow() {
-  return '.'.repeat(EDITOR_COLS);
-}
+const freshStats = () => ({ plays: 0, wins: 0, bestDeaths: null, bestTime: null });
 
-// A fresh level is not empty: it has a floor, a spawn and a door, so a new
+// A fresh level is not empty: it has a floor, a start and a door, so a new
 // player can press TEST immediately and see something playable.
-function createStarterMap() {
-  const map = [];
-  for (let r = 0; r < EDITOR_ROWS; r++) map.push(blankLevelRow().split(''));
-
-  const floorRow = EDITOR_ROWS - 2;
-  for (let c = 0; c < EDITOR_COLS; c++) map[floorRow][c] = '#';
-  map[floorRow - 1][1] = 'S';
-  map[floorRow - 1][EDITOR_COLS - 2] = 'D';
-
-  return map.map(row => row.join(''));
+function createStarterLevel(name) {
+  const g = [];
+  for (let r = 0; r < EDITOR_ROWS; r++) g.push(Array(EDITOR_COLS).fill(r >= EDITOR_ROWS - 3 ? '#' : '.'));
+  g[EDITOR_ROWS - 4][2] = 'P';
+  g[EDITOR_ROWS - 4][EDITOR_COLS - 4] = 'D';
+  return LK.tidyLevel(Object.assign({ name: sanitizeLevelName(name), style: 'neon' }, LK.gridParts(g)));
 }
 
 function createNewCustomLevel(name) {
   const now = Date.now();
-  return {
-    id: makeCustomLevelId(),
-    name: name || 'Untitled Level',
-    visualStyle: 'default',
-    map: createStarterMap(),
-    spikeTriggers: [],
-    spikeTriggerLengths: [],
-    spikeTriggerAreas: [],
-    spikeDirections: [],
-    spikeSpeeds: [],
-    created: now,
-    modified: now,
-    stats: { plays: 0, wins: 0, bestDeaths: null, bestTime: null }
-  };
+  return { id: makeCustomLevelId(), level: createStarterLevel(name), created: now, modified: now, stats: freshStats() };
 }
 
 // ===== VALIDATION / SANITISING =====
-// Imported files come from other players, so never trust their contents.
+// Imported files and codes come from other players, so never trust their contents.
 
 function sanitizeLevelName(name) {
   if (typeof name !== 'string') return 'Untitled Level';
-  const cleaned = name.replace(/[\r\n\t]/g, ' ').trim().slice(0, 28);
+  const cleaned = name.replace(/[\r\n\t]/g, ' ').trim().slice(0, 32);
   return cleaned.length > 0 ? cleaned : 'Untitled Level';
 }
 
-function sanitizeLevelMap(map) {
-  const rows = [];
-  const source = Array.isArray(map) ? map : [];
-
-  for (let r = 0; r < EDITOR_ROWS; r++) {
-    const raw = typeof source[r] === 'string' ? source[r] : '';
-    let row = '';
-    for (let c = 0; c < EDITOR_COLS; c++) {
-      const char = raw[c];
-      row += (typeof char === 'string' && VALID_LEVEL_CHARS.includes(char)) ? char : '.';
-    }
-    rows.push(row);
-  }
-  return rows;
-}
-
-function sanitizeNumberArray(arr, allowNull) {
-  if (!Array.isArray(arr)) return [];
-  return arr.slice(0, 400).map(value => {
-    if (value === null || value === undefined) return allowNull ? null : 0;
-    const num = Number(value);
-    if (!isFinite(num)) return allowNull ? null : 0;
-    return num;
-  });
-}
-
-// Spike travel directions and speeds are validated by the engine's own helpers,
-// so an imported file can never invent a direction the game does not know.
-function sanitizeDirectionArray(arr) {
-  if (!Array.isArray(arr)) return [];
-  return arr.slice(0, 400).map(value => normalizeSpikeDirection(value));
-}
-
-function sanitizeSpeedArray(arr) {
-  if (!Array.isArray(arr)) return [];
-  return arr.slice(0, 400).map(value => normalizeSpikeSpeed(value));
-}
-
-// A trigger area is a rectangle in pixels, relative to the spike's own tile.
-// null means "this spike still uses the classic trigger line".
-function sanitizeTriggerAreaArray(arr) {
-  if (!Array.isArray(arr)) return [];
-  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-
-  return arr.slice(0, 400).map(value => {
-    if (!value || typeof value !== 'object') return null;
-    const x = Number(value.x);
-    const y = Number(value.y);
-    const w = Number(value.w);
-    const h = Number(value.h);
-    if (!isFinite(x) || !isFinite(y) || !isFinite(w) || !isFinite(h)) return null;
-    return {
-      x: clamp(x, -4000, 4000),
-      y: clamp(y, -4000, 4000),
-      w: clamp(w, 0, 4000),
-      h: clamp(h, 0, 4000)
-    };
-  });
+// Any level object (format 3, or a first-editor 20 x 12 one) as a clean format 3 level without an id; null if it is
+// not a level at all. stored: it comes from this save, where even an empty level is a level.
+function cleanAnyLevel(raw, stored) {
+  if (!raw || typeof raw !== 'object') return null;
+  let lv = null;
+  if (LK.isOldLevel(raw)) lv = LK.fromOldLevel(raw);
+  else if (stored || raw.tiles || raw.start || raw.door || raw.format >= 3) lv = LK.cleanLevel(raw);
+  if (!lv) return null;
+  delete lv.id;
+  lv.name = sanitizeLevelName(lv.name);
+  return lv;
 }
 
 function sanitizeStats(stats) {
-  const safe = { plays: 0, wins: 0, bestDeaths: null, bestTime: null };
+  const safe = freshStats();
   if (!stats || typeof stats !== 'object') return safe;
   // Note: isFinite(null) is true, so null has to be ruled out explicitly or a
   // level that was never finished would report a "best" of 0 deaths.
@@ -164,28 +97,18 @@ function sanitizeStats(stats) {
   return safe;
 }
 
-function sanitizeCustomLevel(level) {
-  if (!level || typeof level !== 'object') return null;
-  if (!Array.isArray(level.map) || level.map.length === 0) return null;
-
-  const style = CUSTOM_VISUAL_STYLES.some(s => s.id === level.visualStyle)
-    ? level.visualStyle
-    : 'default';
-
+// A stored record, made safe. A record of the first editor (its level was the record itself) is converted.
+function sanitizeCustomLevel(rec) {
+  if (!rec || typeof rec !== 'object') return null;
+  const level = rec.level ? cleanAnyLevel(rec.level, true) : cleanAnyLevel(rec);
+  if (!level) return null;
   const now = Date.now();
   return {
-    id: typeof level.id === 'string' && level.id.length <= 64 ? level.id : makeCustomLevelId(),
-    name: sanitizeLevelName(level.name),
-    visualStyle: style,
-    map: sanitizeLevelMap(level.map),
-    spikeTriggers: sanitizeNumberArray(level.spikeTriggers, false),
-    spikeTriggerLengths: sanitizeNumberArray(level.spikeTriggerLengths, true),
-    spikeTriggerAreas: sanitizeTriggerAreaArray(level.spikeTriggerAreas),
-    spikeDirections: sanitizeDirectionArray(level.spikeDirections),
-    spikeSpeeds: sanitizeSpeedArray(level.spikeSpeeds),
-    created: isFinite(level.created) ? level.created : now,
-    modified: isFinite(level.modified) ? level.modified : now,
-    stats: sanitizeStats(level.stats)
+    id: typeof rec.id === 'string' && rec.id.length <= 40 && rec.id !== '★' ? rec.id : makeCustomLevelId(),
+    level,
+    created: isFinite(rec.created) ? rec.created : now,
+    modified: isFinite(rec.modified) ? rec.modified : now,
+    stats: sanitizeStats(rec.stats)
   };
 }
 
@@ -193,8 +116,8 @@ function sanitizeCustomLevel(level) {
 
 function loadCustomLevels() {
   try {
-    const raw = localStorage.getItem(CUSTOM_LEVELS_KEY);
-    if (!raw) return [];
+    let raw = localStorage.getItem(CUSTOM_LEVELS_KEY);
+    if (!raw) return migrateOldCustomLevels();
     const parsed = JSON.parse(raw);
     const list = Array.isArray(parsed) ? parsed : parsed.levels;
     if (!Array.isArray(list)) return [];
@@ -203,6 +126,17 @@ function loadCustomLevels() {
     console.warn('Could not load custom levels:', e);
     return [];
   }
+}
+
+// The first editor's levels, once: converted to the full game's size and format.
+function migrateOldCustomLevels() {
+  let old = null;
+  try { old = JSON.parse(localStorage.getItem(OLD_CUSTOM_LEVELS_KEY) || 'null'); } catch (e) { old = null; }
+  const list = old && (Array.isArray(old) ? old : old.levels);
+  if (!Array.isArray(list) || !list.length) return [];
+  const converted = list.map(sanitizeCustomLevel).filter(Boolean);
+  persistCustomLevels(converted);
+  return converted;
 }
 
 function persistCustomLevels(list) {
@@ -221,12 +155,12 @@ function persistCustomLevels(list) {
 }
 
 function getCustomLevel(id) {
-  return loadCustomLevels().find(level => level.id === id) || null;
+  return loadCustomLevels().find(rec => rec.id === id) || null;
 }
 
 // Insert or update a level, keeping the rest of the list untouched.
-function saveCustomLevel(level) {
-  const clean = sanitizeCustomLevel(level);
+function saveCustomLevel(rec) {
+  const clean = sanitizeCustomLevel(rec);
   if (!clean) return null;
 
   clean.modified = Date.now();
@@ -245,7 +179,7 @@ function saveCustomLevel(level) {
 }
 
 function deleteCustomLevel(id) {
-  const list = loadCustomLevels().filter(level => level.id !== id);
+  const list = loadCustomLevels().filter(rec => rec.id !== id);
   return persistCustomLevels(list);
 }
 
@@ -255,72 +189,73 @@ function duplicateCustomLevel(id) {
 
   const copy = JSON.parse(JSON.stringify(original));
   copy.id = makeCustomLevelId();
-  copy.name = sanitizeLevelName(original.name.slice(0, 22) + ' Copy');
+  copy.level.name = sanitizeLevelName(original.level.name.slice(0, 26) + ' Copy');
   copy.created = Date.now();
   copy.modified = Date.now();
-  copy.stats = { plays: 0, wins: 0, bestDeaths: null, bestTime: null };
+  copy.stats = freshStats();
 
   const list = loadCustomLevels();
   list.push(copy);
   return persistCustomLevels(list) ? copy : null;
 }
 
+// A new record for a level from somewhere else (a file, a code, a link); its name gets a (2) if it is taken.
+function addCustomLevel(level, list) {
+  const own = !list;
+  list = list || loadCustomLevels();
+  const now = Date.now();
+  const rec = { id: makeCustomLevelId(), level: JSON.parse(JSON.stringify(level)), created: now, modified: now, stats: freshStats() };
+  delete rec.level.id;
+  if (list.some(other => other.level.name === rec.level.name)) rec.level.name = sanitizeLevelName(rec.level.name.slice(0, 28) + ' (2)');
+  list.push(rec);
+  if (own && !persistCustomLevels(list)) return null;
+  return rec;
+}
+
 // Record the outcome of a play session (used by the level browser cards)
 function recordCustomLevelPlay(id) {
   const list = loadCustomLevels();
-  const level = list.find(item => item.id === id);
-  if (!level) return;
-  level.stats.plays += 1;
+  const rec = list.find(item => item.id === id);
+  if (!rec) return;
+  rec.stats.plays += 1;
   persistCustomLevels(list);
 }
 
 function recordCustomLevelWin(id, levelDeathCount, levelTimeSeconds) {
   const list = loadCustomLevels();
-  const level = list.find(item => item.id === id);
-  if (!level) return;
+  const rec = list.find(item => item.id === id);
+  if (!rec) return;
 
-  level.stats.wins += 1;
-  if (level.stats.bestDeaths === null || levelDeathCount < level.stats.bestDeaths) {
-    level.stats.bestDeaths = levelDeathCount;
+  rec.stats.wins += 1;
+  if (rec.stats.bestDeaths === null || levelDeathCount < rec.stats.bestDeaths) {
+    rec.stats.bestDeaths = levelDeathCount;
   }
-  if (level.stats.bestTime === null || levelTimeSeconds < level.stats.bestTime) {
-    level.stats.bestTime = levelTimeSeconds;
+  if (rec.stats.bestTime === null || levelTimeSeconds < rec.stats.bestTime) {
+    rec.stats.bestTime = levelTimeSeconds;
   }
   persistCustomLevels(list);
 }
 
-// ===== PLAYABLE CONVERSION =====
-// The game engine expects the plain chapter-level shape, nothing else.
-
-function customLevelToPlayable(level) {
-  return {
-    name: level.name,
-    map: level.map.slice(),
-    spikeTriggers: level.spikeTriggers.slice(),
-    spikeTriggerLengths: level.spikeTriggerLengths.slice(),
-    spikeTriggerAreas: (level.spikeTriggerAreas || []).map(area => area ? Object.assign({}, area) : null),
-    spikeDirections: (level.spikeDirections || []).slice(),
-    spikeSpeeds: (level.spikeSpeeds || []).slice(),
-    visualStyle: level.visualStyle,
-    isCustom: true
-  };
+// The level with its id, as a level pack holds it.
+function customLevelWithId(rec) {
+  return LK.tidyLevel(Object.assign({ id: rec.id }, rec.level));
 }
 
-// ===== SHARING (EXPORT / IMPORT) =====
+// ===== SHARING =====
+// A share code is the level as the full game writes it: paste it into the full game's "Load from code" (My levels),
+// or into LOAD CODE here. Opened from a web page, the game shares a link instead, which works in both places too.
 
-function customLevelToShareObject(level) {
-  return {
-    format: 'disbelieve-level',
-    version: CUSTOM_LEVELS_VERSION,
-    name: level.name,
-    visualStyle: level.visualStyle,
-    map: level.map,
-    spikeTriggers: level.spikeTriggers,
-    spikeTriggerLengths: level.spikeTriggerLengths,
-    spikeTriggerAreas: level.spikeTriggerAreas,
-    spikeDirections: level.spikeDirections,
-    spikeSpeeds: level.spikeSpeeds
-  };
+// A level's code, or from a web page a link that opens the level (both read the same).
+function levelShareText(level) {
+  const code = LK.encodeLevel(level);
+  return /^https?:$/.test(location.protocol) ? location.href.split('#')[0] + '#lvl=' + code : code;
+}
+
+// A pasted code or link: saved as a new level. Returns the record, or null if it could not be read.
+function importCustomLevelCode(text) {
+  const decoded = LK.decodeLevel(text);
+  const level = decoded && cleanAnyLevel(decoded);
+  return level ? addCustomLevel(level) : null;
 }
 
 function downloadTextFile(filename, text) {
@@ -345,54 +280,44 @@ function safeFileName(name) {
   return (name || 'level').replace(/[^a-z0-9_\- ]/gi, '').trim().replace(/\s+/g, '_') || 'level';
 }
 
-function exportCustomLevel(level) {
-  const text = JSON.stringify(customLevelToShareObject(level), null, 2);
-  return downloadTextFile(safeFileName(level.name) + '.disbelieve.json', text);
+// A file is a level pack's JSON: { "format": 3, "levels": [ ... ] }, each level with its id.
+function customLevelsFileText(list) {
+  return JSON.stringify({ format: LK.LEVEL_FORMAT, levels: list.map(customLevelWithId) }, null, 2) + '\n';
+}
+
+function exportCustomLevel(rec) {
+  return downloadTextFile(safeFileName(rec.level.name) + '.disbelieve.json', customLevelsFileText([rec]));
 }
 
 function exportAllCustomLevels() {
   const list = loadCustomLevels();
   if (list.length === 0) return false;
-  const text = JSON.stringify({
-    format: 'disbelieve-pack',
-    version: CUSTOM_LEVELS_VERSION,
-    levels: list.map(customLevelToShareObject)
-  }, null, 2);
-  return downloadTextFile('disbelieve_levels.json', text);
+  return downloadTextFile('disbelieve_levels.json', customLevelsFileText(list));
 }
 
-// Accepts a single level file, a multi-level pack, or a bare array.
+// Accepts a level pack, a single level, a bare array, the first editor's files, or a share code / link.
 // Returns { added: number, error: string|null }
 function importCustomLevelsFromText(text) {
-  let parsed;
+  let parsed = null;
   try {
     parsed = JSON.parse(text);
   } catch (e) {
-    return { added: 0, error: 'That file is not valid level data.' };
+    const rec = importCustomLevelCode(text);
+    return rec ? { added: 1, error: null } : { added: 0, error: 'That file is not valid level data.' };
   }
 
   let incoming = [];
   if (Array.isArray(parsed)) incoming = parsed;
-  else if (Array.isArray(parsed.levels)) incoming = parsed.levels;
-  else if (parsed && parsed.map) incoming = [parsed];
+  else if (parsed && Array.isArray(parsed.levels)) incoming = parsed.levels;
+  else if (parsed && typeof parsed === 'object') incoming = [parsed];
   else return { added: 0, error: 'No levels found in that file.' };
 
   const list = loadCustomLevels();
   let added = 0;
-
   incoming.forEach(raw => {
-    const clean = sanitizeCustomLevel(raw);
-    if (!clean) return;
     // Imported levels always become new entries so nothing gets overwritten.
-    clean.id = makeCustomLevelId();
-    clean.created = Date.now();
-    clean.modified = Date.now();
-    clean.stats = { plays: 0, wins: 0, bestDeaths: null, bestTime: null };
-    if (list.some(existing => existing.name === clean.name)) {
-      clean.name = sanitizeLevelName(clean.name.slice(0, 22) + ' (2)');
-    }
-    list.push(clean);
-    added++;
+    const level = cleanAnyLevel(raw);
+    if (level && addCustomLevel(level, list)) added++;
   });
 
   if (added === 0) return { added: 0, error: 'No readable levels in that file.' };
@@ -404,7 +329,7 @@ function importCustomLevelsFromText(text) {
 function promptImportCustomLevels(onDone) {
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = '.json,application/json';
+  input.accept = '.json,.txt,application/json,text/plain';
   input.multiple = true;
   input.style.display = 'none';
   document.body.appendChild(input);

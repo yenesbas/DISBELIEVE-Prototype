@@ -1460,6 +1460,12 @@ function update(deltaTime) {
     return;
   }
 
+  // A player-made level runs on the full game's engine (src/editor/level_play.js)
+  if (customLevelSession) {
+    if (gameState === 'playing' && !isPaused) updateCustomPlay(deltaTime);
+    return;
+  }
+
   // Playing state
   if (isDead) {
     deathFlashTimer -= deltaTime;
@@ -3051,6 +3057,15 @@ function render() {
     return;
   }
 
+  // A player-made level, with its popups (src/editor/level_play.js)
+  if (customLevelSession && (gameState === 'playing' || gameState === 'paused' || gameState === 'levelComplete')) {
+    drawCustomPlay();
+    if (gameState === 'levelComplete') drawLevelCompletePopup();
+    if (gameState === 'paused') drawPauseMenu();
+    renderTransition();
+    return;
+  }
+
   // Don't return early for paused - we need to draw the game first
   // Then we'll draw the pause menu overlay on top
 
@@ -3367,7 +3382,8 @@ function drawLevelCompletePopup() {
   // What happens next, with the auto-advance timer draining underneath
   let footer;
   if (customLevelSession) {
-    footer = customLevelSession.returnState === 'editor' ? 'Back to the editor' : 'Back to your levels';
+    footer = customLevelSession.returnState === 'editor' ? 'Back to the editor'
+      : customLevelSession.returnState === 'menu' ? 'Back to the menu' : 'Back to your levels';
   } else if (currentLevel < levels.length - 1) {
     footer = 'Next level loading';
   } else {
@@ -3504,7 +3520,7 @@ function drawPauseMenu() {
     { label: isFullscreenActive() ? 'EXIT FULLSCREEN' : 'FULLSCREEN',
       action: 'fullscreen', accent: '#44ddcc' },
     { label: 'SETTINGS', action: 'settings', accent: '#8c44ff' },
-    { label: customLevelSession
+    { label: customLevelSession && customLevelSession.returnState !== 'menu'
         ? (customLevelSession.returnState === 'editor' ? 'BACK TO EDITOR' : 'BACK TO MY LEVELS')
         : 'QUIT TO MENU',
       action: 'quit', accent: '#ff6b6b' }
@@ -4030,11 +4046,11 @@ function drawMenuPanelBody(entry, locked, x, y, w) {
     ctx.fillText(saved.length === 1 ? 'level saved' : 'levels saved', x + 46, y + 24);
 
     let cursor = y + 70;
-    saved.slice(0, 5).forEach(level => {
+    saved.slice(0, 5).forEach(rec => {
       ctx.textAlign = 'left';
       ctx.font = '15px Arial, sans-serif';
       ctx.fillStyle = '#c9c4da';
-      ctx.fillText(level.name || 'Untitled', x, cursor);
+      ctx.fillText(rec.level.name || 'Untitled', x, cursor);
       cursor += 26;
     });
     if (!saved.length) {
