@@ -23,6 +23,8 @@ This project follows [Semantic Versioning](https://semver.org/).
 - Exported files are now level packs in the full game's format.
 - Levels made with the first editor are moved into the bigger screen
   automatically; old level files still import.
+- MY LEVELS is now for level creators: it only appears in the main menu once
+  the developer cheat code is typed, instead of unlocking through the chapters.
 
 ### Fixes
 

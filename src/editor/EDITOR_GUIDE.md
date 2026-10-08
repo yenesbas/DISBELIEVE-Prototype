@@ -12,15 +12,13 @@ it looks right, press TEST PLAY, and adjust.
 
 ---
 
-## Unlocking it
+## Opening it
 
-**MY LEVELS** is visible from the start but stays locked until you have earned
-it. You need to:
-
-- finish **every level of every chapter** (bonus levels do not count), and
-- hold a **two-star average** across all of them.
-
-The main menu shows exactly how many levels and stars you still need.
+The editor is for level creators. **MY LEVELS** only appears in the main menu
+once the developer cheat code has been typed on the main menu (it also unlocks
+every level and look). Typing the code again turns developer mode off and
+resets progress. Developer mode lasts until the page is closed or reloaded;
+the levels you made stay saved.
 
 ---
 

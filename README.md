@@ -39,10 +39,10 @@ Here's what awaits you in DISBELIEVE:
 
 DISBELIEVE ships with a full level editor behind **MY LEVELS** in the main menu.
 
-**It has to be earned.** The button is there from the start but stays locked
-until you finish every level of every chapter *and* hold a two-star average
-across all of them - 30 levels and 60 of the 90 stars once all three chapters
-are full. The menu shows how many levels and stars you still need.
+**It is for level creators.** MY LEVELS is not in the menu at all until the
+developer cheat code is typed on the main menu; typing it again turns it off
+(and resets progress). The code is not needed to play a level someone shares
+as a link.
 
 Levels built here are levels for the **full DISBELIEVE game**: the same
 32 x 18 screen, the same blocks, spikes and zones, the same level format and the
@@ -79,8 +79,8 @@ instructions, including how a level gets into the full game:
 - Triggers that can sit anywhere on the map, as a line or as a box
 - Fake platforms that look solid but aren't
 - A level editor that makes levels for the full game, with every trap it has,
-  plus level sharing by code, link or file - unlocked by clearing all three
-  chapters with a two-star average
+  plus level sharing by code, link or file - for level creators, behind the
+  developer cheat code
 - Fullscreen on one key, remembered for next time - or from SETTINGS and the
   pause menu
 - Death counter to track your attempts

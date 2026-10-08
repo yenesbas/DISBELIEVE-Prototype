@@ -799,10 +799,8 @@ function isTrailUnlocked(trail) {
   return isChapterCompleted(trail.unlockChapter);
 }
 
-// ===== LEVEL EDITOR UNLOCK =====
-// The editor is earned, not given: every story level has to be finished AND
-// the player needs a two-star average across all of them. With three full
-// chapters that is 30 levels and 60 of the 90 possible stars.
+// ===== STORY PROGRESS =====
+// Levels finished and stars earned across the chapters, for the menu and settings.
 const EDITOR_UNLOCK_STAR_AVERAGE = 2;
 
 function getStoryLevelTotal() {
@@ -837,33 +835,20 @@ function getEditorUnlockProgress() {
   };
 }
 
+// ===== LEVEL EDITOR =====
+// The editor is for level creators only: it exists once the cheat code has
+// turned developer mode on, and until then MY LEVELS is not even in the menu.
 function isLevelEditorUnlocked() {
-  if (DEVELOPER_MODE) return true; // Developer mode unlocks everything
-  return getEditorUnlockProgress().unlocked;
+  return DEVELOPER_MODE;
 }
 
-// The unlock requirement in one line, for the menu's info panel
-function getEditorUnlockHint() {
-  const progress = getEditorUnlockProgress();
-  if (progress.unlocked) return '';
-  return 'Finish all ' + progress.totalLevels + ' levels with ' +
-         progress.requiredStars + '\u2605 to unlock.';
-}
-
-// Menu notice shown when a locked option is clicked
+// A one-line notice on the main menu
 let menuNotice = '';
 let menuNoticeTimer = 0;
 
 // Single entry point for the MY LEVELS button, from mouse and keyboard alike
 function tryOpenLevelEditor() {
-  if (!isLevelEditorUnlocked()) {
-    const progress = getEditorUnlockProgress();
-    menuNotice = 'LOCKED - you have ' + progress.completed + '/' + progress.totalLevels +
-                 ' levels and ' + progress.stars + '/' + progress.requiredStars + ' \u2605 needed';
-    menuNoticeTimer = 4;
-    return;
-  }
-  openCustomLevelBrowser();
+  if (isLevelEditorUnlocked()) openCustomLevelBrowser();
 }
 
 function getBonusLevelGlobalIndex(chapterIndex) {
@@ -1334,7 +1319,7 @@ function resetPlayer() {
 function update(deltaTime) {
   // Visual effects are now static - no animation updates needed
 
-  // Fade out the "still locked" note on the main menu
+  // Fade out the notice on the main menu
   if (menuNoticeTimer > 0) menuNoticeTimer = Math.max(0, menuNoticeTimer - deltaTime);
 
   // Menu-style screens animate continuously, including while fading in or out
@@ -3718,6 +3703,11 @@ const MENU_ENTRIES = [
   { label: 'SETTINGS',   action: 'settings',    accent: '#55dd88', blurb: 'Audio levels and everything else.' }
 ];
 
+// The entries the menu shows: MY LEVELS only for level creators (isLevelEditorUnlocked)
+function menuEntries() {
+  return MENU_ENTRIES.filter(entry => entry.action !== 'levelEditor' || isLevelEditorUnlocked());
+}
+
 // Screens that use the shared menu look and its animation clock
 const UI_SCREENS = ['menu', 'chapterSelect', 'levelSelect', 'customize', 'settings', 'paused',
                    'levelComplete', 'unlockNotification'];
@@ -3787,7 +3777,7 @@ function updateUiAnimation(screen, deltaTime) {
     screenIntro = 0;
     menuPanelFade = 1;
     menuBarFill = {};
-    menuButtonSlide = MENU_ENTRIES.map(() => 0);
+    menuButtonSlide = menuEntries().map(() => 0);
   }
   uiTime += dt;
   screenIntro += dt;
@@ -3824,13 +3814,13 @@ function updateUiAnimation(screen, deltaTime) {
 
   // The panel follows the mouse when it is over a button, keyboard focus otherwise
   const buttons = window.menuButtons || [];
-  let active = Math.min(Math.max(0, selectedButtonIndex), MENU_ENTRIES.length - 1);
+  let active = Math.min(Math.max(0, selectedButtonIndex), menuEntries().length - 1);
   buttons.forEach((b, i) => {
     if (mouseX >= b.x && mouseX <= b.x + b.width && mouseY >= b.y && mouseY <= b.y + b.height) active = i;
   });
   menuActiveIndex = active;
 
-  MENU_ENTRIES.forEach((entry, i) => {
+  menuEntries().forEach((entry, i) => {
     menuButtonSlide[i] = approach(menuButtonSlide[i] || 0, i === active ? 18 : 0, dt, 14);
   });
 
@@ -3964,7 +3954,7 @@ function uiStat(x, y, w, label, valueText, ratio, color, key) {
   return barY + 8;
 }
 
-function drawMenuPanelBody(entry, locked, x, y, w) {
+function drawMenuPanelBody(entry, x, y, w) {
   const progress = getEditorUnlockProgress();
 
   if (entry.action === 'startGame') {
@@ -4000,42 +3990,6 @@ function drawMenuPanelBody(entry, locked, x, y, w) {
   }
 
   if (entry.action === 'levelEditor') {
-    if (locked) {
-      // The reason this redesign exists: the unlock detail gets a whole column
-      ctx.textAlign = 'left';
-      ctx.fillStyle = 'rgba(255, 90, 90, 0.12)';
-      uiRoundRect(x, y - 17, 104, 26, 13);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255, 120, 120, 0.35)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.font = 'bold 13px Arial, sans-serif';
-      ctx.fillStyle = '#ff8a8a';
-      ctx.fillText('\u{1F512} LOCKED', x + 13, y + 1);
-
-      let cursor = y + 48;
-      ctx.font = '16px Arial, sans-serif';
-      ctx.fillStyle = '#c9c4da';
-      ctx.fillText(getEditorUnlockHint(), x, cursor);
-      cursor += 44;
-
-      cursor = uiStat(x, cursor, w, 'LEVELS FINISHED', progress.completed + ' / ' + progress.totalLevels,
-                            progress.completed / progress.totalLevels, '#8c44ff', 'unlock-levels') + 38;
-      cursor = uiStat(x, cursor, w, 'STARS EARNED', progress.stars + ' / ' + progress.requiredStars,
-                            progress.stars / progress.requiredStars, '#8c44ff', 'unlock-stars') + 40;
-
-      const remaining = [];
-      if (progress.levelsLeft > 0) {
-        remaining.push(progress.levelsLeft + (progress.levelsLeft === 1 ? ' level' : ' levels'));
-      }
-      if (progress.starsLeft > 0) remaining.push(progress.starsLeft + '★');
-      ctx.textAlign = 'left';
-      ctx.font = '15px Arial, sans-serif';
-      ctx.fillStyle = '#8a84a0';
-      ctx.fillText(remaining.length ? remaining.join(' and ') + ' to go' : 'Requirements met.', x, cursor);
-      return;
-    }
-
     const saved = (typeof loadCustomLevels === 'function') ? loadCustomLevels() : [];
     ctx.textAlign = 'left';
     ctx.font = 'bold 44px Impact, monospace';
@@ -4120,7 +4074,7 @@ function drawMenuPanelBody(entry, locked, x, y, w) {
   }
 }
 
-function drawMenuPanel(editorUnlocked) {
+function drawMenuPanel() {
   const L = MENU_LAYOUT;
   const intro = easeOutCubic(clamp01((screenIntro - 0.3) / 0.7));
   if (intro <= 0.001) return;
@@ -4148,8 +4102,8 @@ function drawMenuPanel(editorUnlocked) {
   ctx.fillRect(L.panelX, scanY - 45, L.panelW, 90);
   ctx.restore();
 
-  const entry = MENU_ENTRIES[menuPanelIndex] || MENU_ENTRIES[0];
-  const locked = entry.action === 'levelEditor' && !editorUnlocked;
+  const entries = menuEntries();
+  const entry = entries[menuPanelIndex] || entries[0];
   const x = L.panelX + L.pad;
   const w = L.panelW - L.pad * 2;
 
@@ -4159,7 +4113,7 @@ function drawMenuPanel(editorUnlocked) {
 
   ctx.textAlign = 'left';
   ctx.font = 'bold 32px Impact, monospace';
-  ctx.fillStyle = locked ? '#7e7a90' : entry.accent;
+  ctx.fillStyle = entry.accent;
   ctx.fillText(entry.label, x, L.panelY + 62);
 
   ctx.fillStyle = 'rgba(255,255,255,0.08)';
@@ -4169,23 +4123,20 @@ function drawMenuPanel(editorUnlocked) {
   ctx.fillStyle = '#8a84a0';
   ctx.fillText(entry.blurb, x, L.panelY + 108);
 
-  drawMenuPanelBody(entry, locked, x, L.panelY + 160, w);
+  drawMenuPanelBody(entry, x, L.panelY + 160, w);
   ctx.restore();
 }
 
 // Draw main menu
 function drawMenu() {
   const L = MENU_LAYOUT;
-  const editorUnlocked = isLevelEditorUnlocked();
-
   drawUiBackground();
   drawMenuTitle();
-  drawMenuPanel(editorUnlocked);
+  drawMenuPanel();
 
   window.menuButtons = [];
 
-  MENU_ENTRIES.forEach((entry, index) => {
-    const locked = entry.action === 'levelEditor' && !editorUnlocked;
+  menuEntries().forEach((entry, index) => {
     const rowY = L.btnTop + index * L.btnGap;
     const slide = menuButtonSlide[index] || 0;
 
@@ -4197,8 +4148,7 @@ function drawMenu() {
       width: L.btnW + 18,
       height: L.btnH,
       action: entry.action,
-      buttonIndex: index,
-      locked: locked
+      buttonIndex: index
     };
     window.menuButtons.push(button);
 
@@ -4212,38 +4162,32 @@ function drawMenu() {
     ctx.globalAlpha = appear;
     ctx.translate((1 - appear) * -30, 0);
 
-    if (active && !locked) {
+    if (active) {
       // A soft glow so the highlighted row reads from across the screen
       ctx.shadowColor = entry.accent;
       ctx.shadowBlur = 18;
     }
     uiRoundRect(bx, rowY, L.btnW, L.btnH, 8);
-    ctx.fillStyle = locked
-      ? 'rgba(28, 26, 38, 0.9)'
-      : (active ? 'rgba(58, 50, 84, 0.95)' : 'rgba(35, 31, 48, 0.88)');
+    ctx.fillStyle = active ? 'rgba(58, 50, 84, 0.95)' : 'rgba(35, 31, 48, 0.88)';
     ctx.fill();
     ctx.shadowBlur = 0;
 
-    ctx.strokeStyle = locked ? '#3d3a4d' : (active ? entry.accent : '#463f5c');
+    ctx.strokeStyle = active ? entry.accent : '#463f5c';
     ctx.lineWidth = active ? 3 : 2;
     ctx.stroke();
 
     // Accent tab on the left edge, which stretches when the row is active
     const tabH = (L.btnH - 18) * (active ? 1 : 0.4);
-    ctx.fillStyle = locked ? '#55506b' : entry.accent;
+    ctx.fillStyle = entry.accent;
     uiRoundRect(bx + 8, rowY + (L.btnH - tabH) / 2, 4, tabH, 2);
     ctx.fill();
 
     ctx.textAlign = 'left';
     ctx.font = '30px Arial, sans-serif';
-    ctx.fillStyle = locked ? '#7e7a90' : (active ? '#ffffff' : '#c9c4da');
+    ctx.fillStyle = active ? '#ffffff' : '#c9c4da';
     ctx.fillText(entry.label, bx + 28, rowY + 41);
 
-    if (locked) {
-      ctx.textAlign = 'right';
-      ctx.font = '20px Arial, sans-serif';
-      ctx.fillText('\u{1F512}', bx + L.btnW - 18, rowY + 40);
-    } else if (active) {
+    if (active) {
       ctx.textAlign = 'right';
       ctx.font = '22px Arial, sans-serif';
       ctx.fillStyle = entry.accent;
@@ -4252,7 +4196,7 @@ function drawMenu() {
     ctx.restore();
   });
 
-  // Feedback after clicking something that is still locked
+  // The notice: the cheat code, or a refused fullscreen
   if (menuNoticeTimer > 0 && menuNotice) {
     const fade = clamp01(menuNoticeTimer / 0.8);
     ctx.save();
@@ -5247,11 +5191,15 @@ window.addEventListener('keydown', (e) => {
       if (!DEVELOPER_MODE) {
         // Activate developer mode
         DEVELOPER_MODE = true;
+        menuNotice = 'DEVELOPER MODE - everything unlocked, MY LEVELS is in the menu';
+        menuNoticeTimer = 4;
         console.log('🎮 DEVELOPER MODE ACTIVATED! All customizations unlocked!');
       } else {
         // Deactivate developer mode and reset progress
         DEVELOPER_MODE = false;
         resetProgress();
+        menuNotice = 'DEVELOPER MODE OFF - progress reset';
+        menuNoticeTimer = 4;
         console.log('❌ DEVELOPER MODE DEACTIVATED! Progress reset.');
       }
       // Reset recent keys to prevent re-triggering
