@@ -89,8 +89,12 @@ const ED = {
   sel: null, step: null, join: false, drag: null, before: null, hover: null, mouse: { x: 0, y: 0 },
   L: null, lv: null, problems: [], dirty: true, unsaved: false, undo: [], redo: [],
   preview: false, grid: true, help: false, naming: false, returnState: 'customLevels',
-  status: '', statusColor: '#88ff88', statusT: 0, blink: 0, time: 0, buttons: [], shift: false, alt: false
+  status: '', statusColor: '#88ff88', statusT: 0, blink: 0, time: 0, buttons: [], shift: false, alt: false,
+  fill: false                // Touch screens: the FILL button stands in for SHIFT (drag a rectangle)
 };
+
+// Building with a finger (or a pen) instead of a mouse and keyboard: set by src/touch.js.
+const edTouch = () => document.body.classList.contains('touch');
 
 // ===== MODEL: the level being edited =====
 
@@ -520,7 +524,7 @@ function edAddToTrap(part, s) {
   ED.sel = { t: ED.traps.length - 1, part, k: 0 };
   ED.step = 'trigger';
   ED.join = false;
-  setEditorStatus('Now drag the trigger that fires it. Right-click or ESC: no trigger for now.', '#ffdd33');
+  setEditorStatus('Now drag the trigger that fires it. ' + (edTouch() ? 'Tap Drawing… in the panel' : 'Right-click or ESC') + ': no trigger for now.', '#ffdd33');
 }
 
 // A hint: a new one on a tile (at), or else the picked one's words.
@@ -734,7 +738,7 @@ function buildEditorLayout() {
 
   // --- top bar ---
   add({ x: 10, y: 10, w: 88, h: 36, label: '◀ BACK', font: 14, action: leaveEditor });
-  add({ x: 106, y: 10, w: 250, h: 36, kind: 'name', action: () => { ED.naming = true; ED.blink = 0; } });
+  add({ x: 106, y: 10, w: 250, h: 36, kind: 'name', action: () => { if (edTouch()) edRenameByPrompt(); else { ED.naming = true; ED.blink = 0; } } });
   CUSTOM_VISUAL_STYLES.forEach((style, i) => add({ x: 364 + i * 84, y: 10, w: 80, h: 36, label: style.label, font: 13, active: ED.style === style.id,
     activeColor: '#5b3f8f', borderColor: '#bb88ff', action: () => { if (ED.style !== style.id) { edChange(() => { ED.style = style.id; }); setEditorStatus('Look: ' + style.label, '#cc99ff'); } } }));
   add({ x: 620, y: 10, w: 96, h: 36, label: ED.preview ? 'EDIT VIEW' : 'PREVIEW', font: 13, active: ED.preview, activeColor: '#7a6a1f', borderColor: '#ffdd66',
@@ -802,6 +806,8 @@ function buildEditorLayout() {
   ED.panelEnd = y;
 
   // --- bottom bar ---
+  if (edTouch()) add({ x: 734, y: 684, w: 66, h: 28, label: 'FILL', font: 12, active: ED.fill, activeColor: '#5a4a1f', borderColor: '#ffcc44',
+    action: () => { ED.fill = !ED.fill; setEditorStatus(ED.fill ? 'FILL: drag a rectangle to fill it (or erase it with ERASE)' : 'FILL off: drag to paint', '#ffcc44'); } });
   add({ x: 806, y: 684, w: 66, h: 28, label: 'GRID', font: 12, active: ED.grid, action: () => { ED.grid = !ED.grid; } });
   add({ x: 878, y: 684, w: 66, h: 28, label: 'UNDO', font: 12, disabled: !ED.undo.length, action: editorUndo });
   add({ x: 950, y: 684, w: 66, h: 28, label: 'REDO', font: 12, disabled: !ED.redo.length, action: editorRedo });
@@ -1313,15 +1319,16 @@ function drawEditorBottomBar() {
   // Lines 2-3: what the tool under the mouse does, or what happens next
   const m = ED.mouse, over = ED.buttons.find(b => b.icon && m.x >= b.x && m.x <= b.x + b.w && m.y >= b.y && m.y <= b.y + b.h);
   const hint = over ? ED_TOOLS[over.icon].n + ' (' + ED_TOOLS[over.icon].key + '): ' + ED_TOOLS[over.icon].hint
-    : ED.step && tp ? 'Trap ' + (ED.sel.t + 1) + ': drag the trigger that fires it. Right-click or ESC: no trigger for now.'
-    : ED.join && tp ? 'Place trap spikes or sliding spikes to add them to trap ' + (ED.sel.t + 1) + ': they fire together. ESC when done.'
+    : ED.step && tp ? 'Trap ' + (ED.sel.t + 1) + ': drag the trigger that fires it. ' + (edTouch() ? 'Tap Drawing… in the panel' : 'Right-click or ESC') + ': no trigger for now.'
+    : ED.join && tp ? 'Place trap spikes or sliding spikes to add them to trap ' + (ED.sel.t + 1) + ': they fire together. ' + (edTouch() ? 'Tap Adding… when done.' : 'ESC when done.')
     : ED_TOOLS[ED.tool].n + ': ' + ED_TOOLS[ED.tool].hint;
   ctx.fillStyle = '#b8bcd8';
   ctx.font = '13px Arial, sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
   edWrapText(hint, x, ED_BOTTOM_Y + 46, 950, 17, 2);
-  edText('Right click erases  |  SHIFT+drag = rectangle  |  CTRL+Z undo  |  ENTER test  |  ? help', x, 698, 12, { color: '#8a8a9c', bold: false, max: 560 });
+  if (edTouch()) edText('ERASE tool erases  |  FILL: drag a rectangle  |  ❚❚ in a test: back here  |  ? help', x, 698, 12, { color: '#8a8a9c', bold: false, max: 485 });
+  else edText('Right click erases  |  SHIFT+drag = rectangle  |  CTRL+Z undo  |  ENTER test  |  ? help', x, 698, 12, { color: '#8a8a9c', bold: false, max: 560 });
 }
 
 // --- help overlay ---
@@ -1352,7 +1359,34 @@ function drawEditorHelpOverlay() {
   ctx.fillStyle = 'rgba(255,255,255,0.08)';
   ctx.fillRect(boxX + 40, boxY + 54, boxW - 80, 1);
 
-  const sections = [
+  const sections = edTouch() ? [
+    ['BUILDING (TOUCH)', [
+      'Tap / drag .............. paint with the selected tool',
+      'ERASE tool .............. tap or drag to erase',
+      'FILL (bottom bar) ....... on: a drag fills (or erases) a whole rectangle',
+      'PREVIEW ................. see exactly what the player sees',
+      'Levels are the full game’s size: 32 x 18 tiles'
+    ]],
+    ['TRAPS', [
+      'Trap spike .............. press a tile, drag to aim it, then drag its trigger',
+      'Sliding spikes .......... press a tile, drag to where they dash, then the trigger',
+      'SELECT .................. tap a spike or trigger to pick its trap',
+      'Drag a picked part ...... move it; drag the square corner to size a trigger',
+      'Panel ................... speed, delay, reach, dash, trigger on / visible,',
+      '                          + Spikes (they fire together), + Trigger,',
+      '                          and Delete for what is picked',
+      'Trap spike on a spike ... drag from it again to aim it another way',
+      'Drawing… / Adding… ...... tap to stop drawing a trigger / adding spikes'
+    ]],
+    ['TOOLS', [
+      'Tap a tool in the palette on the left; the bar below says what it does'
+    ]],
+    ['LEVEL', [
+      'The name ................ tap it to rename the level',
+      'UNDO / REDO / SAVE ...... the buttons; ◀ BACK leaves (offers to save first)',
+      'TEST PLAY ............... play it; ❚❚ comes straight back to the editor'
+    ]]
+  ] : [
     ['BUILDING', [
       'Left click / drag ....... paint with the selected tool',
       'Right click / drag ...... erase (works with any tool)',
@@ -1403,7 +1437,7 @@ function drawEditorHelpOverlay() {
   ctx.fillStyle = '#8a8a9c';
   ctx.font = '14px Arial, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('Click anywhere or press ? / ESC to close', GAME_WIDTH / 2, boxY + boxH - 16);
+  ctx.fillText(edTouch() ? 'Tap anywhere to close' : 'Click anywhere or press ? / ESC to close', GAME_WIDTH / 2, boxY + boxH - 16);
   ctx.textAlign = 'left';
 }
 
@@ -1455,6 +1489,38 @@ function editorMouseMove(x, y, event) {
 function editorMouseUp() {
   if (!ED.map || !ED.drag) return;
   edUp();
+}
+
+// ===== TOUCH INPUT =====
+// A finger (or a pen) builds like the mouse's left button; the FILL button
+// stands in for SHIFT. Wired up in custom_levels.js.
+
+function editorTouchDown(x, y) {
+  if (!ED.map) return;
+  ED.mouse.x = x;
+  ED.mouse.y = y;
+  ED.hover = edCell(x, y);
+  editorMouseDown(x, y, 0, { shiftKey: ED.fill, altKey: false });
+}
+
+function editorTouchMove(x, y) {
+  editorMouseMove(x, y, { shiftKey: ED.fill, altKey: false });
+}
+
+function editorTouchUp() {
+  editorMouseUp();
+  ED.hover = null; // No finger over the map any more: no ghost of the tool left behind
+}
+
+// Renaming with the on-screen keyboard: typing on the canvas needs a real one
+function edRenameByPrompt() {
+  const v = window.prompt('Level name:', ED.name);
+  if (v == null) return;
+  const name = sanitizeLevelName(String(v));
+  if (name === ED.name) return;
+  ED.name = name;
+  ED.unsaved = true;
+  ED.dirty = true;
 }
 
 // ===== KEYBOARD INPUT =====

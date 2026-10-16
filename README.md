@@ -41,8 +41,12 @@ DISBELIEVE ships with a full level editor behind **MY LEVELS** in the main menu.
 
 **It is for level creators.** MY LEVELS is not in the menu at all until the
 developer cheat code is typed on the main menu; typing it again turns it off
-(and resets progress). The code is not needed to play a level someone shares
+(and resets progress). Without a keyboard, tap the DISBELIEVE title five times
+to be asked for the code. The code is not needed to play a level someone shares
 as a link.
+
+The editor works on tablets too: drag with a finger to paint and to aim traps,
+and use the **FILL** button in place of SHIFT.
 
 Levels built here are levels for the **full DISBELIEVE game**: the same
 32 x 18 screen, the same blocks, spikes and zones, the same level format and the

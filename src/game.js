@@ -5009,6 +5009,12 @@ function handleClick(event) {
   const x = point.x;
   const y = point.y;
 
+  // The title, tapped five times: the cheat code without a keyboard
+  if (gameState === 'menu' && isMenuTitleTap(x, y)) {
+    handleMenuTitleTap();
+    return;
+  }
+
   // Check menu buttons
   if (gameState === 'menu' && window.menuButtons) {
     window.menuButtons.forEach(button => {
@@ -5163,6 +5169,53 @@ function handleClick(event) {
   }
 }
 
+// The cheat code turns developer mode on - or off again, which resets progress
+function toggleDeveloperMode() {
+  if (!DEVELOPER_MODE) {
+    // Activate developer mode
+    DEVELOPER_MODE = true;
+    menuNotice = 'DEVELOPER MODE - everything unlocked, MY LEVELS is in the menu';
+    menuNoticeTimer = 4;
+    console.log('🎮 DEVELOPER MODE ACTIVATED! All customizations unlocked!');
+  } else {
+    // Deactivate developer mode and reset progress
+    DEVELOPER_MODE = false;
+    resetProgress();
+    menuNotice = 'DEVELOPER MODE OFF - progress reset';
+    menuNoticeTimer = 4;
+    console.log('❌ DEVELOPER MODE DEACTIVATED! Progress reset.');
+  }
+}
+
+// Without a keyboard (a tablet, a phone) the code can't be typed on the menu:
+// tapping the DISBELIEVE title five times in a row asks for it instead, and the
+// on-screen keyboard comes up for it.
+const CHEAT_TAPS = 5;
+let cheatTapCount = 0;
+let cheatTapLast = 0;
+
+function isMenuTitleTap(x, y) {
+  return x >= MENU_LAYOUT.colX - 20 && x <= MENU_LAYOUT.colX + 500 && y >= 60 && y <= 160;
+}
+
+function handleMenuTitleTap() {
+  const now = performance.now();
+  cheatTapCount = now - cheatTapLast < 1000 ? cheatTapCount + 1 : 1;
+  cheatTapLast = now;
+  if (cheatTapCount < CHEAT_TAPS) return;
+  cheatTapCount = 0;
+  // Keys held when the dialog opens would never see their keyup
+  keys.left = keys.right = keys.space = keys.r = false;
+  const code = window.prompt('Enter the code:', '');
+  if (code == null || !code.trim()) return;
+  if (code.trim().toLowerCase() === CHEAT_CODE) {
+    toggleDeveloperMode();
+  } else {
+    menuNotice = 'That is not the code';
+    menuNoticeTimer = 3;
+  }
+}
+
 // Keyboard event listeners
 window.addEventListener('keydown', (e) => {
   // Enable audio on any key press
@@ -5188,20 +5241,7 @@ window.addEventListener('keydown', (e) => {
     
     // Check if cheat code was entered (toggle developer mode)
     if (recentKeys.includes(CHEAT_CODE)) {
-      if (!DEVELOPER_MODE) {
-        // Activate developer mode
-        DEVELOPER_MODE = true;
-        menuNotice = 'DEVELOPER MODE - everything unlocked, MY LEVELS is in the menu';
-        menuNoticeTimer = 4;
-        console.log('🎮 DEVELOPER MODE ACTIVATED! All customizations unlocked!');
-      } else {
-        // Deactivate developer mode and reset progress
-        DEVELOPER_MODE = false;
-        resetProgress();
-        menuNotice = 'DEVELOPER MODE OFF - progress reset';
-        menuNoticeTimer = 4;
-        console.log('❌ DEVELOPER MODE DEACTIVATED! Progress reset.');
-      }
+      toggleDeveloperMode();
       // Reset recent keys to prevent re-triggering
       recentKeys = '';
     }
