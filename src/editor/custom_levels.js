@@ -514,6 +514,50 @@ canvas.addEventListener('contextmenu', (event) => {
   if (gameState === 'editor') event.preventDefault();
 });
 
+// Fingers and pens. A touch sends no mouse events while it drags, so the editor
+// listens to the pointer itself: one finger at a time builds, like the left
+// button. Cancelling the pointerdown stops the browser's own mouse events for
+// it; the click that still follows is swallowed, so a tap that leaves the
+// editor can't also press a button on the screen it lands on.
+let editorTouchId = null;
+let editorSwallowClick = false;
+
+canvas.addEventListener('pointerdown', (event) => {
+  if (event.pointerType === 'mouse' || gameState !== 'editor' || transitionState !== 'none') return;
+  event.preventDefault();
+  editorSwallowClick = true;
+  if (editorTouchId !== null) return;
+  editorTouchId = event.pointerId;
+  try { canvas.setPointerCapture(event.pointerId); } catch (x) { }
+  const p = editorCanvasPoint(event);
+  editorTouchDown(p.x, p.y);
+});
+
+canvas.addEventListener('pointermove', (event) => {
+  if (event.pointerId !== editorTouchId) return;
+  event.preventDefault();
+  if (gameState !== 'editor') return;
+  const p = editorCanvasPoint(event);
+  editorTouchMove(p.x, p.y);
+});
+
+function editorTouchEnd(event) {
+  if (event.pointerId !== editorTouchId) return;
+  editorTouchId = null;
+  if (gameState === 'editor') editorTouchUp();
+}
+canvas.addEventListener('pointerup', editorTouchEnd);
+canvas.addEventListener('pointercancel', editorTouchEnd);
+
+window.addEventListener('click', (event) => {
+  if (!editorSwallowClick) return;
+  editorSwallowClick = false;
+  if (event.target === canvas) event.stopPropagation();
+}, true);
+window.addEventListener('pointerdown', (event) => {
+  if (event.pointerType === 'mouse' || event.target !== canvas || gameState !== 'editor') editorSwallowClick = false;
+}, true);
+
 window.addEventListener('keydown', (event) => {
   if (transitionState !== 'none') return;
   if (gameState === 'editor') {

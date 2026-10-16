@@ -25,6 +25,11 @@ This project follows [Semantic Versioning](https://semver.org/).
   automatically; old level files still import.
 - MY LEVELS is now for level creators: it only appears in the main menu once
   the developer cheat code is typed, instead of unlocking through the chapters.
+- On a tablet or phone, tapping the DISBELIEVE title five times asks for the
+  cheat code, so it can be entered without a keyboard.
+- The editor works by touch: drag a finger to paint, aim trap spikes and draw
+  triggers; a **FILL** button stands in for SHIFT; tap the level name to rename
+  it; the help screen and hints describe the touch controls.
 
 ### Fixes
 

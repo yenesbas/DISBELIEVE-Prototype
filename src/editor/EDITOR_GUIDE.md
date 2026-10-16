@@ -20,6 +20,29 @@ every level and look). Typing the code again turns developer mode off and
 resets progress. Developer mode lasts until the page is closed or reloaded;
 the levels you made stay saved.
 
+**On a tablet or phone** (no keyboard): tap the **DISBELIEVE** title on the
+main menu five times in a row. A box asks for the code, and the on-screen
+keyboard comes up to type it.
+
+---
+
+## Building on a tablet
+
+The editor works with a finger (or a pen) too:
+
+- **Tap or drag** on the map paints with the selected tool, like the left mouse
+  button. Trap spikes, sliding spikes, triggers and flip zones are dragged the
+  same way.
+- **ERASE** tool erases (there is no right click).
+- **FILL** (bottom bar, touch screens only) stands in for SHIFT: while it is on,
+  a drag fills - or with ERASE, clears - a whole rectangle.
+- Tap the **level name** to rename it.
+- **Drawing…** / **Adding…** in the panel stop drawing a trigger / adding
+  spikes (ESC on a keyboard).
+- Everything else has a button: UNDO, REDO, SAVE, TEST PLAY, PREVIEW, ? help,
+  and Delete in the panel. In a test play, the **❚❚** button comes straight
+  back to the editor.
+
 ---
 
 ## Building the map
